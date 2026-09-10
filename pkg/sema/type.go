@@ -34,8 +34,53 @@ var (
 	TypeBool    = &BasicType{TypeName: "bool"}
 	TypeString  = &BasicType{TypeName: "string"}
 	TypeVoid    = &BasicType{TypeName: "void"}
+	TypeAny     = &BasicType{TypeName: "any"}
+	TypeArray   = &ArrayType{ElementType: TypeAny}
 	TypeUnknown = &BasicType{TypeName: "unknown"}
 )
+
+// ArrayType 数组类型表示
+type ArrayType struct {
+	ElementType Type
+}
+
+func (a *ArrayType) Name() string {
+	if a.ElementType == nil || a.ElementType.Name() == "any" {
+		return "array"
+	}
+	return "[]" + a.ElementType.Name()
+}
+
+func (a *ArrayType) Equals(other Type) bool {
+	if other == nil {
+		return false
+	}
+	if other.Name() == "array" || a.Name() == "array" {
+		return true
+	}
+	otherArr, ok := other.(*ArrayType)
+	if !ok {
+		return false
+	}
+	return a.ElementType.Equals(otherArr.ElementType)
+}
+
+// StructType 结构体类型表示
+type StructType struct {
+	StructName string
+	Fields     map[string]Type
+}
+
+func (s *StructType) Name() string {
+	return s.StructName
+}
+
+func (s *StructType) Equals(other Type) bool {
+	if other == nil {
+		return false
+	}
+	return s.StructName == other.Name()
+}
 
 // FuncType 函数类型表示
 type FuncType struct {
@@ -90,6 +135,10 @@ func LookupBasicType(name string) Type {
 		return TypeString
 	case "void":
 		return TypeVoid
+	case "array":
+		return TypeArray
+	case "any":
+		return TypeAny
 	default:
 		return nil
 	}

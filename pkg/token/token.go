@@ -97,6 +97,7 @@ const (
 	IN       TokenType = "in"
 	TRY      TokenType = "try"
 	CATCH    TokenType = "catch"
+	STRUCT   TokenType = "struct"
 )
 
 // Token 结构体表示一个具体的词法单元
@@ -136,6 +137,7 @@ var keywords = map[string]TokenType{
 	"in":       IN,
 	"try":      TRY,
 	"catch":    CATCH,
+	"struct":   STRUCT,
 }
 
 // LookupIdent 检查标识符是否为关键字

@@ -67,6 +67,31 @@ func NewAnalyzer() *SemanticAnalyzer {
 	defBuiltin("mem_check_leaks", []Type{}, TypeInt)
 	defBuiltin("check_leaks", []Type{}, TypeInt)
 
+	// 后端核心内建：数组与切片
+	defBuiltin("range", []Type{TypeInt, TypeInt}, TypeArray)
+	defBuiltin("len", []Type{TypeAny}, TypeInt)
+	defBuiltin("append", []Type{TypeAny, TypeAny}, TypeArray)
+	defBuiltin("push", []Type{TypeAny, TypeAny}, TypeArray)
+	defBuiltin("pop", []Type{TypeAny}, TypeAny)
+
+	// 后端核心内建：文件 IO (std/fs)
+	defBuiltin("fs_read_text", []Type{TypeString}, TypeString)
+	defBuiltin("fs_write_text", []Type{TypeString, TypeString}, TypeBool)
+	defBuiltin("fs_exists", []Type{TypeString}, TypeBool)
+	defBuiltin("fs_remove", []Type{TypeString}, TypeBool)
+
+	// 后端核心内建：字符串处理 (std/str)
+	defBuiltin("str_len", []Type{TypeString}, TypeInt)
+	defBuiltin("str_contains", []Type{TypeString, TypeString}, TypeBool)
+	defBuiltin("str_split", []Type{TypeString, TypeString}, TypeArray)
+	defBuiltin("str_trim", []Type{TypeString}, TypeString)
+	defBuiltin("str_upper", []Type{TypeString}, TypeString)
+	defBuiltin("str_lower", []Type{TypeString}, TypeString)
+
+	// 后端核心内建：随机数 (std/random)
+	defBuiltin("random_int", []Type{TypeInt, TypeInt}, TypeInt)
+	defBuiltin("random_float", []Type{}, TypeFloat)
+
 	return &SemanticAnalyzer{
 		globalScope:   global,
 		currentScope:  global,
@@ -89,13 +114,60 @@ func (sa *SemanticAnalyzer) exitScope() {
 	}
 }
 
+// resolveType 根据类型名解析基本类型或用户自定义结构体类型
+func (sa *SemanticAnalyzer) resolveType(name string) Type {
+	if t := LookupBasicType(name); t != nil {
+		return t
+	}
+	if sym, ok := sa.currentScope.Resolve(name); ok {
+		if st, ok := sym.Type.(*StructType); ok {
+			return st
+		}
+	}
+	return nil
+}
+
+// declareStruct 登记结构体类型定义
+func (sa *SemanticAnalyzer) declareStruct(st *ast.StructDecl) {
+	fields := make(map[string]Type)
+	for _, f := range st.Fields {
+		var ft Type = TypeAny
+		if f.Type != nil {
+			if t := sa.resolveType(f.Type.Name); t != nil {
+				ft = t
+			} else {
+				sa.addError(f.Type.Pos(), fmt.Sprintf("结构体 %s 的字段 %s 未知类型: %s", st.Name.Value, f.Name.Value, f.Type.Name))
+			}
+		}
+		fields[f.Name.Value] = ft
+	}
+	structType := &StructType{
+		StructName: st.Name.Value,
+		Fields:     fields,
+	}
+	sym := &Symbol{
+		Name: st.Name.Value,
+		Kind: SymStruct,
+		Type: structType,
+		Pos:  st.Pos(),
+	}
+	if err := sa.globalScope.Define(sym); err != nil {
+		sa.addError(st.Pos(), err.Error())
+	}
+}
+
 // Analyze 执行完整程序的语义分析
 func (sa *SemanticAnalyzer) Analyze(program *ast.Program) {
 	if program == nil {
 		return
 	}
 
-	// 第一阶段：收集所有函数声明签名（支持互相递归与前向调用）
+	// 第一阶段：收集所有结构体声明与函数声明签名（支持互相递归与前向调用）
+	for _, decl := range program.Decls {
+		if st, ok := decl.(*ast.StructDecl); ok {
+			sa.declareStruct(st)
+		}
+	}
 	for _, decl := range program.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok {
 			sa.declareFunc(fn)
@@ -119,7 +191,7 @@ func (sa *SemanticAnalyzer) Analyze(program *ast.Program) {
 func (sa *SemanticAnalyzer) declareFunc(fn *ast.FuncDecl) {
 	var retType Type = TypeVoid
 	if fn.ReturnType != nil {
-		resolved := LookupBasicType(fn.ReturnType.Name)
+		resolved := sa.resolveType(fn.ReturnType.Name)
 		if resolved == nil {
 			sa.addError(fn.ReturnType.Pos(), fmt.Sprintf("未知返回类型 %q", fn.ReturnType.Name))
 		} else {
@@ -131,7 +203,7 @@ func (sa *SemanticAnalyzer) declareFunc(fn *ast.FuncDecl) {
 	for _, p := range fn.Params {
 		var pt Type = TypeUnknown
 		if p.Type != nil {
-			resolved := LookupBasicType(p.Type.Name)
+			resolved := sa.resolveType(p.Type.Name)
 			if resolved == nil {
 				sa.addError(p.Type.Pos(), fmt.Sprintf("形参 %q 类型未知: %q", p.Name.Value, p.Type.Name))
 			} else {
@@ -166,7 +238,7 @@ func (sa *SemanticAnalyzer) analyzeFuncBody(fn *ast.FuncDecl) {
 	for _, p := range fn.Params {
 		var pt Type = TypeUnknown
 		if p.Type != nil {
-			if t := LookupBasicType(p.Type.Name); t != nil {
+			if t := sa.resolveType(p.Type.Name); t != nil {
 				pt = t
 			}
 		}
@@ -233,6 +305,64 @@ func (sa *SemanticAnalyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		sa.analyzeStmt(s.Body)
 
+	case *ast.ForInStmt:
+		iterType := sa.inferExprType(s.Iterable)
+		var elemType Type = TypeAny
+		if arrType, ok := iterType.(*ArrayType); ok {
+			if arrType.ElementType != nil {
+				elemType = arrType.ElementType
+			}
+		} else if iterType != nil && !iterType.Equals(TypeAny) {
+			sa.addError(s.Iterable.Pos(), fmt.Sprintf("for ... in 只能遍历 array, 遇到类型 %s", iterType.Name()))
+		}
+		sa.enterScope()
+		_ = sa.currentScope.Define(&Symbol{
+			Name:  s.VarName.Value,
+			Kind:  SymVar,
+			Type:  elemType,
+			Pos:   s.VarName.Pos(),
+			IsMut: true,
+		})
+		if s.Body != nil {
+			for _, sub := range s.Body.Statements {
+				sa.analyzeStmt(sub)
+			}
+		}
+		sa.exitScope()
+
+	case *ast.BreakStmt:
+		// 允许在循环内跳出
+
+	case *ast.ContinueStmt:
+		// 允许在循环内继续
+
+	case *ast.TryCatchStmt:
+		if s.TryBlock != nil {
+			sa.enterScope()
+			for _, sub := range s.TryBlock.Statements {
+				sa.analyzeStmt(sub)
+			}
+			sa.exitScope()
+		}
+		if s.CatchBlock != nil {
+			sa.enterScope()
+			if s.ErrVar != nil {
+				_ = sa.currentScope.Define(&Symbol{
+					Name: s.ErrVar.Value,
+					Kind: SymVar,
+					Type: TypeString,
+					Pos:  s.ErrVar.Pos(),
+				})
+			}
+			for _, sub := range s.CatchBlock.Statements {
+				sa.analyzeStmt(sub)
+			}
+			sa.exitScope()
+		}
+
+	case *ast.StructDecl:
+		sa.declareStruct(s)
+
 	case *ast.ReturnStmt:
 		sa.analyzeReturnStmt(s)
 	}
@@ -241,7 +371,7 @@ func (sa *SemanticAnalyzer) analyzeStmt(stmt ast.Stmt) {
 func (sa *SemanticAnalyzer) analyzeVarDecl(v *ast.VarDeclStmt) {
 	var declaredType Type
 	if v.Type != nil {
-		declaredType = LookupBasicType(v.Type.Name)
+		declaredType = sa.resolveType(v.Type.Name)
 		if declaredType == nil {
 			sa.addError(v.Type.Pos(), fmt.Sprintf("未知类型标注 %q", v.Type.Name))
 		}
@@ -254,7 +384,7 @@ func (sa *SemanticAnalyzer) analyzeVarDecl(v *ast.VarDeclStmt) {
 
 	var finalType Type = TypeUnknown
 	if declaredType != nil && valType != nil {
-		if !declaredType.Equals(valType) {
+		if !declaredType.Equals(valType) && !declaredType.Equals(TypeAny) {
 			sa.addError(v.Value.Pos(), fmt.Sprintf("类型不匹配: 变量 %q 声明类型为 %s, 但赋值类型为 %s",
 				v.Name.Value, declaredType.Name(), valType.Name()))
 		}
@@ -296,40 +426,66 @@ func (sa *SemanticAnalyzer) analyzeVarDecl(v *ast.VarDeclStmt) {
 }
 
 func (sa *SemanticAnalyzer) analyzeAssignStmt(as *ast.AssignStmt) {
-	ident, ok := as.Left.(*ast.Identifier)
-	if !ok {
-		sa.addError(as.Left.Pos(), "赋值操作的左值必须是标识符")
-		return
-	}
-
-	sym, found := sa.currentScope.Resolve(ident.Value)
-	if !found {
-		sa.addError(ident.Pos(), fmt.Sprintf("未定义的变量 %q", ident.Value))
-		return
-	}
-
-	if !sym.IsMut && sym.Kind != SymVar {
-		sa.addError(ident.Pos(), fmt.Sprintf("无法给不可变变量 %q 重新赋值 (提示: 可将变量声明为 'mut %s')", ident.Value, ident.Value))
-		return
-	}
-
-	rightType := sa.inferExprType(as.Right)
-	if rightType != nil && sym.Type != nil && !sym.Type.Equals(rightType) {
-		sa.addError(as.Right.Pos(), fmt.Sprintf("赋值类型不匹配: 变量 %q 类型为 %s, 赋值表达式类型为 %s",
-			ident.Value, sym.Type.Name(), rightType.Name()))
-	}
-
-	// 借用检查器：赋值转移所有权 (Move) 或接收堆分配
-	if srcIdent, ok := as.Right.(*ast.Identifier); ok {
-		if sa.BorrowChecker.IsResource(srcIdent.Value) {
-			_ = sa.BorrowChecker.Move(srcIdent.Value, ident.Value, as.Pos())
+	switch lhs := as.Left.(type) {
+	case *ast.Identifier:
+		sym, found := sa.currentScope.Resolve(lhs.Value)
+		if !found {
+			sa.addError(lhs.Pos(), fmt.Sprintf("未定义的变量 %q", lhs.Value))
+			return
 		}
-	} else if call, ok := as.Right.(*ast.CallExpr); ok {
-		if fnIdent, ok := call.Function.(*ast.Identifier); ok {
-			if fnIdent.Value == "alloc" || fnIdent.Value == "mem_alloc" {
-				sa.BorrowChecker.RegisterResource(ident.Value, as.Pos())
+
+		if !sym.IsMut && sym.Kind != SymVar {
+			sa.addError(lhs.Pos(), fmt.Sprintf("无法给不可变变量 %q 重新赋值 (提示: 可将变量声明为 'mut %s')", lhs.Value, lhs.Value))
+			return
+		}
+
+		rightType := sa.inferExprType(as.Right)
+		if rightType != nil && sym.Type != nil && !sym.Type.Equals(rightType) && !sym.Type.Equals(TypeAny) {
+			sa.addError(as.Right.Pos(), fmt.Sprintf("赋值类型不匹配: 变量 %q 类型为 %s, 赋值表达式类型为 %s",
+				lhs.Value, sym.Type.Name(), rightType.Name()))
+		}
+
+		// 借用检查器：赋值转移所有权 (Move) 或接收堆分配
+		if srcIdent, ok := as.Right.(*ast.Identifier); ok {
+			if sa.BorrowChecker.IsResource(srcIdent.Value) {
+				_ = sa.BorrowChecker.Move(srcIdent.Value, lhs.Value, as.Pos())
+			}
+		} else if call, ok := as.Right.(*ast.CallExpr); ok {
+			if fnIdent, ok := call.Function.(*ast.Identifier); ok {
+				if fnIdent.Value == "alloc" || fnIdent.Value == "mem_alloc" {
+					sa.BorrowChecker.RegisterResource(lhs.Value, as.Pos())
+				}
 			}
 		}
+
+	case *ast.IndexExpr:
+		targetType := sa.inferExprType(lhs.Left)
+		idxType := sa.inferExprType(lhs.Index)
+		if idxType != nil && !idxType.Equals(TypeInt) {
+			sa.addError(lhs.Index.Pos(), "数组索引必须为 int")
+		}
+		valType := sa.inferExprType(as.Right)
+		if arrType, ok := targetType.(*ArrayType); ok && arrType.ElementType != nil && !arrType.ElementType.Equals(TypeAny) {
+			if valType != nil && !valType.Equals(arrType.ElementType) {
+				sa.addError(as.Right.Pos(), fmt.Sprintf("数组元素类型不匹配: 期望 %s, 传入 %s", arrType.ElementType.Name(), valType.Name()))
+			}
+		}
+
+	case *ast.MemberExpr:
+		objType := sa.inferExprType(lhs.Object)
+		valType := sa.inferExprType(as.Right)
+		if st, ok := objType.(*StructType); ok {
+			if expected, ok := st.Fields[lhs.Property.Value]; ok {
+				if valType != nil && expected != nil && !valType.Equals(expected) && !expected.Equals(TypeAny) {
+					sa.addError(as.Right.Pos(), fmt.Sprintf("结构体字段 %s.%s 类型不匹配: 期望 %s, 传入 %s", st.StructName, lhs.Property.Value, expected.Name(), valType.Name()))
+				}
+			} else {
+				sa.addError(lhs.Property.Pos(), fmt.Sprintf("结构体 %s 没有字段 %q", st.StructName, lhs.Property.Value))
+			}
+		}
+
+	default:
+		sa.addError(as.Left.Pos(), "赋值操作的左值必须是标识符、数组索引或结构体字段")
 	}
 }
 
@@ -381,6 +537,86 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 		return TypeString
 	case *ast.BooleanLiteral:
 		return TypeBool
+
+	case *ast.ArrayLiteral:
+		var elemType Type = TypeAny
+		if len(e.Elements) > 0 {
+			elemType = sa.inferExprType(e.Elements[0])
+			for i := 1; i < len(e.Elements); i++ {
+				t := sa.inferExprType(e.Elements[i])
+				if elemType != nil && t != nil && !elemType.Equals(t) {
+					elemType = TypeAny
+				}
+			}
+		}
+		return &ArrayType{ElementType: elemType}
+
+	case *ast.IndexExpr:
+		leftType := sa.inferExprType(e.Left)
+		idxType := sa.inferExprType(e.Index)
+		if idxType != nil && !idxType.Equals(TypeInt) {
+			sa.addError(e.Index.Pos(), fmt.Sprintf("索引表达式类型必须为 int, 实际为 %s", idxType.Name()))
+		}
+		if leftType == nil {
+			return TypeUnknown
+		}
+		if arrType, ok := leftType.(*ArrayType); ok {
+			if arrType.ElementType != nil {
+				return arrType.ElementType
+			}
+			return TypeAny
+		}
+		if leftType.Equals(TypeString) {
+			return TypeString
+		}
+		if leftType.Equals(TypeAny) {
+			return TypeAny
+		}
+		sa.addError(e.Left.Pos(), fmt.Sprintf("类型 %s 不支持索引操作", leftType.Name()))
+		return TypeUnknown
+
+	case *ast.MemberExpr:
+		objType := sa.inferExprType(e.Object)
+		if objType == nil {
+			return TypeUnknown
+		}
+		if st, ok := objType.(*StructType); ok {
+			if ft, ok := st.Fields[e.Property.Value]; ok {
+				return ft
+			}
+			sa.addError(e.Property.Pos(), fmt.Sprintf("结构体 %s 没有名为 %q 的字段", st.StructName, e.Property.Value))
+			return TypeUnknown
+		}
+		if objType.Equals(TypeAny) {
+			return TypeAny
+		}
+		sa.addError(e.Object.Pos(), fmt.Sprintf("无法在非结构体类型 %s 上访问字段 %q", objType.Name(), e.Property.Value))
+		return TypeUnknown
+
+	case *ast.StructLiteral:
+		sym, found := sa.currentScope.Resolve(e.Name.Value)
+		if !found {
+			sa.addError(e.Name.Pos(), fmt.Sprintf("未定义的结构体类型 %q", e.Name.Value))
+			return TypeUnknown
+		}
+		st, ok := sym.Type.(*StructType)
+		if !ok {
+			sa.addError(e.Name.Pos(), fmt.Sprintf("%q 不是结构体类型", e.Name.Value))
+			return TypeUnknown
+		}
+		for fname, valExpr := range e.Fields {
+			valType := sa.inferExprType(valExpr)
+			expectedType, ok := st.Fields[fname]
+			if !ok {
+				sa.addError(valExpr.Pos(), fmt.Sprintf("结构体 %s 没有字段 %q", st.StructName, fname))
+				continue
+			}
+			if valType != nil && expectedType != nil && !valType.Equals(expectedType) && !expectedType.Equals(TypeAny) {
+				sa.addError(valExpr.Pos(), fmt.Sprintf("结构体 %s 字段 %q 类型不匹配: 期望 %s, 传入 %s",
+					st.StructName, fname, expectedType.Name(), valType.Name()))
+			}
+		}
+		return st
 	case *ast.Identifier:
 		sym, found := sa.currentScope.Resolve(e.Value)
 		if !found {
@@ -502,6 +738,63 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 				sa.inferExprType(arg)
 			}
 			return TypeVoid
+		}
+
+		// 内置 range 遍历函数
+		if funcIdent.Value == "range" {
+			if len(e.Arguments) < 1 || len(e.Arguments) > 2 {
+				sa.addError(e.Pos(), "range 期望 1 或 2 个整型参数 (end 或 start, end)")
+			}
+			for _, arg := range e.Arguments {
+				t := sa.inferExprType(arg)
+				if t != nil && !t.Equals(TypeInt) {
+					sa.addError(arg.Pos(), "range 参数必须是 int")
+				}
+			}
+			return &ArrayType{ElementType: TypeInt}
+		}
+
+		// 内置容器长度函数 len
+		if funcIdent.Value == "len" {
+			if len(e.Arguments) != 1 {
+				sa.addError(e.Pos(), "len 期望 1 个参数")
+			} else {
+				t := sa.inferExprType(e.Arguments[0])
+				if t != nil && !t.Equals(TypeArray) && !t.Equals(TypeString) && !t.Equals(TypeAny) {
+					sa.addError(e.Arguments[0].Pos(), fmt.Sprintf("len 期望 array 或 string, 遇到 %s", t.Name()))
+				}
+			}
+			return TypeInt
+		}
+
+		// 内置追加元素函数 append / push
+		if funcIdent.Value == "append" || funcIdent.Value == "push" {
+			if len(e.Arguments) != 2 {
+				sa.addError(e.Pos(), fmt.Sprintf("%s 期望 2 个参数 (arr, val)", funcIdent.Value))
+				return TypeArray
+			}
+			arrType := sa.inferExprType(e.Arguments[0])
+			elemType := sa.inferExprType(e.Arguments[1])
+			if arrType != nil && !arrType.Equals(TypeArray) && !arrType.Equals(TypeAny) {
+				sa.addError(e.Arguments[0].Pos(), fmt.Sprintf("%s 第 1 个参数必须是 array", funcIdent.Value))
+			}
+			if at, ok := arrType.(*ArrayType); ok && at.ElementType != nil && !at.ElementType.Equals(TypeAny) {
+				return at
+			}
+			return &ArrayType{ElementType: elemType}
+		}
+
+		// 内置弹栈函数 pop
+		if funcIdent.Value == "pop" {
+			if len(e.Arguments) != 1 {
+				sa.addError(e.Pos(), "pop 期望 1 个参数")
+				return TypeAny
+			}
+			arrType := sa.inferExprType(e.Arguments[0])
+			if at, ok := arrType.(*ArrayType); ok && at.ElementType != nil {
+				return at.ElementType
+			}
+			return TypeAny
 		}
 
 		// 内置断言与恐慌函数

@@ -148,6 +148,52 @@ fn add(x: int, y: int) -> int {
 	}
 }
 
+func TestBackendSyntaxParsing(t *testing.T) {
+	input := `
+struct Point {
+    x: int,
+    y: int,
+}
+
+let arr = [10, 20, 30];
+let val = arr[0];
+arr[1] = 99;
+
+let pt = Point { x: 1, y: 2 };
+let px = pt.x;
+
+for item in arr {
+    if item == 99 {
+        break;
+    } else {
+        continue;
+    }
+}
+
+try {
+    p("running");
+} catch (err) {
+    p(err);
+}
+`
+	l := lexer.New("test_backend.lc", input)
+	p := New(l)
+	prog := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(prog.Decls) != 1 {
+		t.Fatalf("Expected 1 struct decl, got %d", len(prog.Decls))
+	}
+	sd, ok := prog.Decls[0].(*ast.StructDecl)
+	if !ok || sd.Name.Value != "Point" || len(sd.Fields) != 2 {
+		t.Fatalf("StructDecl mismatch: %+v", sd)
+	}
+
+	if len(prog.Stmts) != 7 {
+		t.Fatalf("Expected 7 statements, got %d", len(prog.Stmts))
+	}
+}
+
 func checkParserErrors(t *testing.T, p *Parser) {
 	errors := p.Errors()
 	if len(errors) == 0 {

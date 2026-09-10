@@ -271,6 +271,89 @@ func (rs *ReturnStmt) String() string {
 	return "return;"
 }
 
+// ForInStmt for ... in 循环语句 (for x in arr { ... })
+type ForInStmt struct {
+	Token    token.Token // 'for'
+	VarName  *Identifier // 迭代变量
+	Iterable Expr        // 迭代集合或 range
+	Body     *BlockStmt
+}
+
+func (fs *ForInStmt) Pos() token.Position { return fs.Token.Pos }
+func (fs *ForInStmt) stmtNode()           {}
+func (fs *ForInStmt) String() string {
+	return fmt.Sprintf("for %s in %s %s", fs.VarName.Value, fs.Iterable.String(), fs.Body.String())
+}
+
+// BreakStmt 循环跳出语句 (break;)
+type BreakStmt struct {
+	Token token.Token // 'break'
+}
+
+func (bs *BreakStmt) Pos() token.Position { return bs.Token.Pos }
+func (bs *BreakStmt) stmtNode()           {}
+func (bs *BreakStmt) String() string       { return "break;" }
+
+// ContinueStmt 循环继续语句 (continue;)
+type ContinueStmt struct {
+	Token token.Token // 'continue'
+}
+
+func (cs *ContinueStmt) Pos() token.Position { return cs.Token.Pos }
+func (cs *ContinueStmt) stmtNode()           {}
+func (cs *ContinueStmt) String() string       { return "continue;" }
+
+// TryCatchStmt 异常容错捕获语句 (try { ... } catch (err) { ... })
+type TryCatchStmt struct {
+	Token      token.Token // 'try'
+	TryBlock   *BlockStmt
+	ErrVar     *Identifier // 可选，如 err
+	CatchBlock *BlockStmt
+}
+
+func (ts *TryCatchStmt) Pos() token.Position { return ts.Token.Pos }
+func (ts *TryCatchStmt) stmtNode()           {}
+func (ts *TryCatchStmt) String() string {
+	errStr := ""
+	if ts.ErrVar != nil {
+		errStr = "(" + ts.ErrVar.Value + ")"
+	}
+	return fmt.Sprintf("try %s catch %s %s", ts.TryBlock.String(), errStr, ts.CatchBlock.String())
+}
+
+// StructField 结构体字段定义
+type StructField struct {
+	Name *Identifier
+	Type *TypeAnnotation
+}
+
+func (sf *StructField) String() string {
+	if sf.Type != nil {
+		return fmt.Sprintf("%s: %s", sf.Name.Value, sf.Type.Name)
+	}
+	return sf.Name.Value
+}
+
+// StructDecl 结构体类型声明 (struct Point { x: int, y: int })
+type StructDecl struct {
+	Token  token.Token // 'struct'
+	Name   *Identifier
+	Fields []*StructField
+}
+
+func (sd *StructDecl) Pos() token.Position { return sd.Token.Pos }
+func (sd *StructDecl) declNode()           {}
+func (sd *StructDecl) stmtNode()           {}
+func (sd *StructDecl) String() string {
+	var out bytes.Buffer
+	out.WriteString("struct " + sd.Name.Value + " {\n")
+	for _, f := range sd.Fields {
+		out.WriteString("  " + f.String() + ",\n")
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
 // ==========================================
 // 表达式 (Expressions)
 // ==========================================
@@ -383,3 +466,62 @@ type GroupedExpr struct {
 func (ge *GroupedExpr) Pos() token.Position { return ge.Token.Pos }
 func (ge *GroupedExpr) exprNode()           {}
 func (ge *GroupedExpr) String() string       { return ge.Expression.String() }
+
+// ArrayLiteral 数组字面量 [1, 2, 3]
+type ArrayLiteral struct {
+	Token    token.Token // '['
+	Elements []Expr
+}
+
+func (al *ArrayLiteral) Pos() token.Position { return al.Token.Pos }
+func (al *ArrayLiteral) exprNode()           {}
+func (al *ArrayLiteral) String() string {
+	var parts []string
+	for _, el := range al.Elements {
+		parts = append(parts, el.String())
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// IndexExpr 下标索引表达式 arr[i]
+type IndexExpr struct {
+	Token token.Token // '['
+	Left  Expr        // 数组或可索引对象
+	Index Expr        // 下标表达式
+}
+
+func (ie *IndexExpr) Pos() token.Position { return ie.Left.Pos() }
+func (ie *IndexExpr) exprNode()           {}
+func (ie *IndexExpr) String() string {
+	return fmt.Sprintf("%s[%s]", ie.Left.String(), ie.Index.String())
+}
+
+// MemberExpr 成员点号属性访问 (user.name)
+type MemberExpr struct {
+	Token    token.Token // '.'
+	Object   Expr
+	Property *Identifier
+}
+
+func (me *MemberExpr) Pos() token.Position { return me.Object.Pos() }
+func (me *MemberExpr) exprNode()           {}
+func (me *MemberExpr) String() string {
+	return fmt.Sprintf("%s.%s", me.Object.String(), me.Property.Value)
+}
+
+// StructLiteral 结构体实例化 (Point { x: 10, y: 20 })
+type StructLiteral struct {
+	Token  token.Token // 结构体名称 Token
+	Name   *Identifier
+	Fields map[string]Expr
+}
+
+func (sl *StructLiteral) Pos() token.Position { return sl.Token.Pos }
+func (sl *StructLiteral) exprNode()           {}
+func (sl *StructLiteral) String() string {
+	var parts []string
+	for k, v := range sl.Fields {
+		parts = append(parts, fmt.Sprintf("%s: %s", k, v.String()))
+	}
+	return sl.Name.Value + " { " + strings.Join(parts, ", ") + " }"
+}

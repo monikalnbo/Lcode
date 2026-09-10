@@ -1,0 +1,100 @@
+// ==============================================================================
+//  Lcode 后端引擎全特性验证与演示程序 (Backend Engine Showcase)
+// ==============================================================================
+
+struct Task {
+    id: int,
+    title: string,
+    priority: int,
+}
+
+fn main() -> void {
+    println("🚀 =========================================");
+    println("   Lcode 后端引擎核心架构能力全景测试");
+    println("   =========================================");
+
+    // 1. 自定义 Struct 复合类型与字段读写
+    println("\n[1] 结构体 (Struct) 建模与实例操作:");
+    mut t1: Task = Task { id: 101, title: "设计分布式缓存服务", priority: 1 };
+    mut t2: Task = Task { id: 102, title: "优化数据库连接池", priority: 2 };
+    println("任务 101 初始标题:", t1.title);
+    t1.priority = 5;
+    println("任务 101 更新后优先级:", t1.priority);
+
+    // 2. 动态数组 (Array)、切片、追加与索引变更
+    println("\n[2] 动态数组与索引 (Array & Indexing):");
+    mut server_ports = [8000, 8080, 9000];
+    println("初始端口列表:", server_ports);
+    println("主服务端口 ports[0]:", server_ports[0]);
+    server_ports[1] = 8443;
+    println("更新备用端口 ports[1]:", server_ports[1]);
+    push(server_ports, 9999);
+    println("追加网关端口后长度:", len(server_ports));
+    let last_port = pop(server_ports);
+    println("弹出最后端口:", last_port);
+    println("当前端口集合:", server_ports);
+
+    // 3. for ... in 集合迭代与 break / continue 控制流
+    println("\n[3] for ... in 容器迭代与流控 (Break/Continue):");
+    mut valid_count = 0;
+    for port in server_ports {
+        if port > 8500 {
+            println("跳过监控端口:", port);
+            continue;
+        }
+        valid_count += 1;
+        println("激活服务运行于端口:", port);
+    }
+    println("有效业务端口总数:", valid_count);
+
+    // 4. range 区间生成器迭代
+    println("\n[4] range(start, end) 范围迭代:");
+    mut batch_sum = 0;
+    for step in range(1, 6) {
+        batch_sum += step;
+        if step == 4 {
+            println("达到预定批次上限，执行 break; 退出批处理");
+            break;
+        }
+    }
+    println("批处理计算累计值:", batch_sum);
+
+    // 5. try ... catch 异常隔离与弹性容错恢复机制
+    println("\n[5] try ... catch 运行时故障自愈测试:");
+    try {
+        println("尝试执行危险除零探测...");
+        let err_val = 100 / 0;
+        println("此行不应打印:", err_val);
+    } catch (err) {
+        println("✓ 成功拦截并捕获异常:", err);
+        println("✓ 引擎保持稳定，自动恢复服务链路");
+    }
+
+    // 6. 后端文件持久化 IO 与清理
+    println("\n[6] 后端文件 IO 持久化测试 (std/fs):");
+    let test_file = "backend_demo.tmp";
+    let file_ok = fs_write_text(test_file, "Lcode backend storage engine data\nTimestamp: 2026-09");
+    println("写入临时配置文件成功:", file_ok);
+    let exists_now = fs_exists(test_file);
+    println("文件系统状态存在性:", exists_now);
+    let content = fs_read_text(test_file);
+    println("读出文件内容摘要:\n---");
+    print(content);
+    println("\n---");
+    let rm_ok = fs_remove(test_file);
+    println("临时资源清理完成:", rm_ok);
+
+    // 7. 后端字符串处理与随机数发生器
+    println("\n[7] 字符串处理与随机数测试 (std/str & std/random):");
+    let raw_str = "   MICROSERVICE_ENGINE   ";
+    let trimmed = str_trim(raw_str);
+    let lowered = str_lower(trimmed);
+    println("原始文本修整与小写:", lowered);
+    let parts = str_split(lowered, "_");
+    println("下划线切分结果:", parts);
+
+    let seed_rand = random_int(100, 999);
+    println("生成随机集群节点 ID:", seed_rand);
+
+    println("\n🎉 后端核心引擎全部特性已成功运行并通过检验！");
+}

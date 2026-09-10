@@ -19,8 +19,9 @@ const (
 	LESSGREATER // > < >= <=
 	SUM         // + -
 	PRODUCT     // * / %
-	PREFIX      // -x !x
+	PREFIX      // -x !x &x *x
 	CALL        // fn(x)
+	INDEX       // arr[i], obj.prop
 )
 
 var precedences = map[token.TokenType]int{
@@ -38,6 +39,8 @@ var precedences = map[token.TokenType]int{
 	token.QUO:         PRODUCT,
 	token.REM:         PRODUCT,
 	token.LPAREN:      CALL,
+	token.LBRACKET:    INDEX,
+	token.DOT:         INDEX,
 }
 
 type (
@@ -54,6 +57,7 @@ type Parser struct {
 
 	prefixParseFns map[token.TokenType]prefixParseFn
 	infixParseFns  map[token.TokenType]infixParseFn
+	structNames    map[string]bool
 }
 
 // New 创建语法分析器
@@ -63,6 +67,7 @@ func New(l *lexer.Lexer) *Parser {
 		errors:         make([]string, 0),
 		prefixParseFns: make(map[token.TokenType]prefixParseFn),
 		infixParseFns:  make(map[token.TokenType]infixParseFn),
+		structNames:    make(map[string]bool),
 	}
 
 	// 注册前缀解析函数
@@ -76,6 +81,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.AMP, p.parsePrefixExpr)
 	p.registerPrefix(token.MUL, p.parsePrefixExpr)
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpr)
+	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
 
 	// 注册中缀解析函数
 	p.registerInfix(token.ADD, p.parseInfixExpr)
@@ -92,6 +98,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LAND, p.parseInfixExpr)
 	p.registerInfix(token.LOR, p.parseInfixExpr)
 	p.registerInfix(token.LPAREN, p.parseCallExpr)
+	p.registerInfix(token.LBRACKET, p.parseIndexExpr)
+	p.registerInfix(token.DOT, p.parseMemberExpr)
 
 	// 初始化 curToken 和 peekToken
 	p.nextToken()
@@ -177,6 +185,11 @@ func (p *Parser) ParseProgram() *ast.Program {
 			if decl != nil {
 				program.Decls = append(program.Decls, decl)
 			}
+		} else if p.curTokenIs(token.STRUCT) {
+			decl := p.parseStructDecl()
+			if decl != nil {
+				program.Decls = append(program.Decls, decl)
+			}
 		} else {
 			stmt := p.parseStatement()
 			if stmt != nil {
@@ -221,10 +234,20 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseVarDeclStmt()
 	case token.RETURN:
 		return p.parseReturnStmt()
+	case token.BREAK:
+		return p.parseBreakStmt()
+	case token.CONTINUE:
+		return p.parseContinueStmt()
 	case token.IF:
 		return p.parseIfStmt()
 	case token.WHILE:
 		return p.parseWhileStmt()
+	case token.FOR:
+		return p.parseForStmt()
+	case token.TRY:
+		return p.parseTryCatchStmt()
+	case token.STRUCT:
+		return p.parseStructDecl()
 	case token.LBRACE:
 		return p.parseBlockStmt()
 	default:
@@ -478,7 +501,11 @@ func (p *Parser) parseExpression(precedence int) ast.Expr {
 }
 
 func (p *Parser) parseIdentifier() ast.Expr {
-	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	if p.structNames[p.curToken.Literal] && p.peekTokenIs(token.LBRACE) {
+		return p.parseStructLiteral()
+	}
+	return ident
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expr {
@@ -582,3 +609,206 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	msg := fmt.Sprintf("%s: 遇到未预料的标记 %s (字面量: %q)", p.curToken.Pos, t, p.curToken.Literal)
 	p.errors = append(p.errors, msg)
 }
+
+// parseForStmt 解析 for var in iterable { body }
+func (p *Parser) parseForStmt() *ast.ForInStmt {
+	stmt := &ast.ForInStmt{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	stmt.VarName = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	if !p.expectPeek(token.IN) {
+		return nil
+	}
+
+	p.nextToken() // 移到 iterable 表达式
+	stmt.Iterable = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStmt()
+	return stmt
+}
+
+// parseBreakStmt 解析 break;
+func (p *Parser) parseBreakStmt() *ast.BreakStmt {
+	stmt := &ast.BreakStmt{Token: p.curToken}
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+// parseContinueStmt 解析 continue;
+func (p *Parser) parseContinueStmt() *ast.ContinueStmt {
+	stmt := &ast.ContinueStmt{Token: p.curToken}
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+	return stmt
+}
+
+// parseTryCatchStmt 解析 try { ... } catch (err) { ... }
+func (p *Parser) parseTryCatchStmt() *ast.TryCatchStmt {
+	stmt := &ast.TryCatchStmt{Token: p.curToken}
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+	stmt.TryBlock = p.parseBlockStmt()
+
+	if !p.expectPeek(token.CATCH) {
+		return nil
+	}
+
+	if p.peekTokenIs(token.LPAREN) {
+		p.nextToken() // 吃掉 (
+		if p.expectPeek(token.IDENT) {
+			stmt.ErrVar = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		}
+		if !p.expectPeek(token.RPAREN) {
+			return nil
+		}
+	}
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+	stmt.CatchBlock = p.parseBlockStmt()
+	return stmt
+}
+
+// parseStructDecl 解析 struct Name { field: type, ... }
+func (p *Parser) parseStructDecl() *ast.StructDecl {
+	decl := &ast.StructDecl{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	decl.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	p.structNames[decl.Name.Value] = true
+
+	if !p.expectPeek(token.LBRACE) {
+		return nil
+	}
+
+	decl.Fields = make([]*ast.StructField, 0)
+	p.nextToken()
+
+	for !p.curTokenIs(token.RBRACE) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.COMMA) || p.curTokenIs(token.SEMICOLON) {
+			p.nextToken()
+			continue
+		}
+		if p.curTokenIs(token.IDENT) {
+			f := &ast.StructField{
+				Name: &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+			}
+			if p.peekTokenIs(token.COLON) {
+				p.nextToken() // 吃掉 :
+				if p.expectPeek(token.IDENT) {
+					f.Type = &ast.TypeAnnotation{Token: p.curToken, Name: p.curToken.Literal}
+				}
+			}
+			decl.Fields = append(decl.Fields, f)
+		}
+		p.nextToken()
+	}
+
+	return decl
+}
+
+// parseStructLiteral 解析 Name { field: val, ... }
+func (p *Parser) parseStructLiteral() ast.Expr {
+	lit := &ast.StructLiteral{
+		Token:  p.curToken,
+		Name:   &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal},
+		Fields: make(map[string]ast.Expr),
+	}
+
+	p.nextToken() // 移到 {
+	p.nextToken() // 移到第一个字段名
+
+	for !p.curTokenIs(token.RBRACE) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.COMMA) || p.curTokenIs(token.SEMICOLON) {
+			p.nextToken()
+			continue
+		}
+		if p.curTokenIs(token.IDENT) {
+			fieldName := p.curToken.Literal
+			if !p.expectPeek(token.COLON) {
+				return nil
+			}
+			p.nextToken()
+			val := p.parseExpression(LOWEST)
+			lit.Fields[fieldName] = val
+		}
+		p.nextToken()
+	}
+
+	return lit
+}
+
+// parseArrayLiteral 解析 [1, 2, 3]
+func (p *Parser) parseArrayLiteral() ast.Expr {
+	array := &ast.ArrayLiteral{Token: p.curToken}
+	array.Elements = p.parseExprList(token.RBRACKET)
+	return array
+}
+
+func (p *Parser) parseExprList(end token.TokenType) []ast.Expr {
+	list := make([]ast.Expr, 0)
+
+	if p.peekTokenIs(end) {
+		p.nextToken()
+		return list
+	}
+
+	p.nextToken()
+	list = append(list, p.parseExpression(LOWEST))
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken() // 吃掉 ,
+		if p.peekTokenIs(end) {
+			break // 允许末尾多余逗号 [1, 2, ]
+		}
+		p.nextToken()
+		list = append(list, p.parseExpression(LOWEST))
+	}
+
+	if !p.expectPeek(end) {
+		return nil
+	}
+
+	return list
+}
+
+// parseIndexExpr 解析 arr[i]
+func (p *Parser) parseIndexExpr(left ast.Expr) ast.Expr {
+	expr := &ast.IndexExpr{Token: p.curToken, Left: left}
+
+	p.nextToken()
+	expr.Index = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(token.RBRACKET) {
+		return nil
+	}
+
+	return expr
+}
+
+// parseMemberExpr 解析 obj.prop
+func (p *Parser) parseMemberExpr(left ast.Expr) ast.Expr {
+	expr := &ast.MemberExpr{Token: p.curToken, Object: left}
+
+	if !p.expectPeek(token.IDENT) {
+		return nil
+	}
+	expr.Property = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+	return expr
+}
+

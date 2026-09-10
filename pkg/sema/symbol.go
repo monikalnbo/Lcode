@@ -15,6 +15,7 @@ const (
 	SymConst  SymbolKind = "LET"
 	SymFunc   SymbolKind = "FN"
 	SymParam  SymbolKind = "PARAM"
+	SymStruct SymbolKind = "STRUCT"
 )
 
 // Symbol 符号结构体

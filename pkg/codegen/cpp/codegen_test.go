@@ -50,3 +50,66 @@ fn main() -> void {
 		t.Errorf("Expected lcode::io::println")
 	}
 }
+
+func TestBackendFeaturesCodegen(t *testing.T) {
+	input := `
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn main() -> void {
+    let p: Point = Point { x: 10, y: 20 };
+    mut arr = [1, 2, 3];
+    arr[0] = 100;
+    let first = arr[0];
+
+    for val in arr {
+        if val > 50 {
+            break;
+        } else {
+            continue;
+        }
+    }
+
+    try {
+        let bad = 10 / 0;
+    } catch (e) {
+        println("caught");
+    }
+}
+`
+	l := lexer.New("test_backend_cg.lc", input)
+	p := parser.New(l)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser error: %v", p.Errors())
+	}
+
+	gen := NewGenerator()
+	cppCode, err := gen.Generate(prog)
+	if err != nil {
+		t.Fatalf("Codegen error: %v", err)
+	}
+
+	expectedSnippets := []string{
+		"struct Point {",
+		"int64_t x;",
+		"int64_t y;",
+		"Point _s{};",
+		"std::vector<int64_t>{1LL, 2LL, 3LL}",
+		"arr[0LL] = 100LL;",
+		"for (auto& val : arr) {",
+		"break;",
+		"continue;",
+		"try {",
+		"} catch (const std::exception& e) {",
+	}
+
+	for _, s := range expectedSnippets {
+		if !strings.Contains(cppCode, s) {
+			t.Errorf("Expected C++ codegen to contain %q, but got:\n%s", s, cppCode)
+		}
+	}
+}
+

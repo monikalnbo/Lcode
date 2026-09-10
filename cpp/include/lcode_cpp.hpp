@@ -21,6 +21,24 @@
 #include <chrono>
 #include <thread>
 #include <iomanip>
+#include <fstream>
+#include <random>
+
+template <typename T>
+inline std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
+    os << "[";
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << v[i];
+    }
+    os << "]";
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const std::exception& e) {
+    os << e.what();
+    return os;
+}
 
 namespace lcode {
 
@@ -312,6 +330,7 @@ namespace io {
 template <typename... Args>
 void println(Args&&... args) {
     std::ostringstream ss;
+    ss << std::boolalpha;
     ((ss << std::forward<Args>(args) << " "), ...);
     std::string str = ss.str();
     if (!str.empty() && str.back() == ' ') {
@@ -323,6 +342,7 @@ void println(Args&&... args) {
 template <typename... Args>
 void print(Args&&... args) {
     std::ostringstream ss;
+    ss << std::boolalpha;
     ((ss << std::forward<Args>(args) << " "), ...);
     std::string str = ss.str();
     if (!str.empty() && str.back() == ' ') {
@@ -385,8 +405,17 @@ inline int64_t escape_return(int64_t h) {
 
 // 异常与调用栈桥接
 inline void panic(const std::string& msg) {
-    std::cerr << "\033[91m💥 [运行时恐慌 Panic]: " << msg << "\033[0m" << std::endl;
-    std::exit(1);
+    throw std::runtime_error(msg);
+}
+
+inline int64_t lcode_div(int64_t a, int64_t b) {
+    if (b == 0) throw std::runtime_error("除以零错误");
+    return a / b;
+}
+
+inline int64_t lcode_mod(int64_t a, int64_t b) {
+    if (b == 0) throw std::runtime_error("除以零错误");
+    return a % b;
 }
 
 inline void assert(bool condition, const std::string& msg) {
@@ -402,3 +431,146 @@ inline void stack_dump() {
 inline int64_t stack_depth() {
     return 1;
 }
+
+// ==========================================
+// 6. 后端引擎支持：动态数组、切片与容器操作
+// ==========================================
+inline std::vector<int64_t> range(int64_t end) {
+    std::vector<int64_t> res;
+    if (end > 0) {
+        res.reserve(end);
+        for (int64_t i = 0; i < end; ++i) res.push_back(i);
+    }
+    return res;
+}
+
+inline std::vector<int64_t> range(int64_t start, int64_t end) {
+    std::vector<int64_t> res;
+    if (end > start) {
+        res.reserve(end - start);
+        for (int64_t i = start; i < end; ++i) res.push_back(i);
+    }
+    return res;
+}
+
+template <typename T>
+inline int64_t len(const std::vector<T>& v) {
+    return static_cast<int64_t>(v.size());
+}
+
+inline int64_t len(const std::string& s) {
+    return static_cast<int64_t>(s.size());
+}
+
+template <typename T, typename U>
+inline std::vector<T>& push(std::vector<T>& v, const U& item) {
+    v.push_back(static_cast<T>(item));
+    return v;
+}
+
+template <typename T, typename U>
+inline std::vector<T>& append(std::vector<T>& v, const U& item) {
+    v.push_back(static_cast<T>(item));
+    return v;
+}
+
+template <typename T>
+inline T pop(std::vector<T>& v) {
+    if (v.empty()) {
+        panic("pop from empty vector");
+    }
+    T val = v.back();
+    v.pop_back();
+    return val;
+}
+
+// ==========================================
+// 7. 后端引擎支持：文件系统操作 (std/fs)
+// ==========================================
+inline std::string fs_read_text(const std::string& path) {
+    std::ifstream ifs(path);
+    if (!ifs.is_open()) {
+        panic("failed to open file for read: " + path);
+    }
+    std::ostringstream ss;
+    ss << ifs.rdbuf();
+    return ss.str();
+}
+
+inline bool fs_write_text(const std::string& path, const std::string& text) {
+    std::ofstream ofs(path);
+    if (!ofs.is_open()) {
+        return false;
+    }
+    ofs << text;
+    return true;
+}
+
+inline bool fs_exists(const std::string& path) {
+    std::ifstream ifs(path);
+    return ifs.good();
+}
+
+inline bool fs_remove(const std::string& path) {
+    return std::remove(path.c_str()) == 0;
+}
+
+// ==========================================
+// 8. 后端引擎支持：字符串处理 (std/str)
+// ==========================================
+inline int64_t str_len(const std::string& s) {
+    return static_cast<int64_t>(s.size());
+}
+
+inline bool str_contains(const std::string& s, const std::string& sub) {
+    return s.find(sub) != std::string::npos;
+}
+
+inline std::vector<std::string> str_split(const std::string& s, const std::string& delim) {
+    std::vector<std::string> tokens;
+    if (delim.empty()) {
+        for (char c : s) tokens.push_back(std::string(1, c));
+        return tokens;
+    }
+    size_t prev = 0, pos = 0;
+    while ((pos = s.find(delim, prev)) != std::string::npos) {
+        tokens.push_back(s.substr(prev, pos - prev));
+        prev = pos + delim.length();
+    }
+    tokens.push_back(s.substr(prev));
+    return tokens;
+}
+
+inline std::string str_trim(const std::string& s) {
+    auto start = s.find_first_not_of(" \t\n\r");
+    if (start == std::string::npos) return "";
+    auto end = s.find_last_not_of(" \t\n\r");
+    return s.substr(start, end - start + 1);
+}
+
+inline std::string str_upper(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::toupper(c));
+    return s;
+}
+
+inline std::string str_lower(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(c));
+    return s;
+}
+
+// ==========================================
+// 9. 后端引擎支持：随机数生成 (std/random)
+// ==========================================
+inline int64_t random_int(int64_t min_v, int64_t max_v) {
+    if (max_v <= min_v) return min_v;
+    static std::mt19937_64 rng(std::random_device{}());
+    std::uniform_int_distribution<int64_t> dist(min_v, max_v);
+    return dist(rng);
+}
+
+inline double random_float() {
+    static std::mt19937_64 rng(std::random_device{}());
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    return dist(rng);
+}
+

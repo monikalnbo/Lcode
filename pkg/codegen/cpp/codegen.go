@@ -47,7 +47,14 @@ func (g *Generator) Generate(prog *ast.Program) (string, error) {
 	g.writeln("#include \"lcode_cpp.hpp\"")
 	g.writeln("")
 
-	// 3. 前置函数声明 (Forward Declarations)
+	// 3. 结构体定义 (Struct Definitions)
+	for _, decl := range prog.Decls {
+		if st, ok := decl.(*ast.StructDecl); ok {
+			g.generateStructDecl(st)
+		}
+	}
+
+	// 4. 前置函数声明 (Forward Declarations)
 	for _, decl := range prog.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok {
 			g.generateFuncSignature(fn)
@@ -56,7 +63,7 @@ func (g *Generator) Generate(prog *ast.Program) (string, error) {
 	}
 	g.writeln("")
 
-	// 4. 函数具体实现
+	// 5. 函数具体实现
 	for _, decl := range prog.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok {
 			if err := g.generateFunc(fn); err != nil {
@@ -126,6 +133,21 @@ func (g *Generator) generateFunc(fn *ast.FuncDecl) error {
 	g.writeIndent()
 	g.buf.WriteString("}\n")
 	return nil
+}
+
+func (g *Generator) generateStructDecl(st *ast.StructDecl) {
+	g.writeln(fmt.Sprintf("struct %s {", st.Name.Value))
+	g.indent++
+	for _, f := range st.Fields {
+		t := "auto"
+		if f.Type != nil {
+			t = toCppType(f.Type.Name)
+		}
+		g.writeln(fmt.Sprintf("%s %s;", t, f.Name.Value))
+	}
+	g.indent--
+	g.writeln("};")
+	g.writeln("")
 }
 
 func (g *Generator) generateStmt(stmt ast.Stmt) error {
@@ -251,6 +273,60 @@ func (g *Generator) generateStmt(stmt ast.Stmt) error {
 		g.indent--
 		g.writeIndent()
 		g.buf.WriteString("}\n")
+
+	case *ast.ForInStmt:
+		iterStr, err := g.generateExpr(s.Iterable)
+		if err != nil {
+			return err
+		}
+		g.writeIndent()
+		g.buf.WriteString(fmt.Sprintf("for (auto& %s : %s) {\n", s.VarName.Value, iterStr))
+		g.indent++
+		for _, subStmt := range s.Body.Statements {
+			if err := g.generateStmt(subStmt); err != nil {
+				return err
+			}
+		}
+		g.indent--
+		g.writeIndent()
+		g.buf.WriteString("}\n")
+
+	case *ast.BreakStmt:
+		g.writeIndent()
+		g.buf.WriteString("break;\n")
+
+	case *ast.ContinueStmt:
+		g.writeIndent()
+		g.buf.WriteString("continue;\n")
+
+	case *ast.TryCatchStmt:
+		g.writeIndent()
+		g.buf.WriteString("try {\n")
+		g.indent++
+		for _, subStmt := range s.TryBlock.Statements {
+			if err := g.generateStmt(subStmt); err != nil {
+				return err
+			}
+		}
+		g.indent--
+		g.writeIndent()
+		errVar := "const std::exception& err"
+		if s.ErrVar != nil {
+			errVar = fmt.Sprintf("const std::exception& %s", s.ErrVar.Value)
+		}
+		g.buf.WriteString(fmt.Sprintf("} catch (%s) {\n", errVar))
+		g.indent++
+		for _, subStmt := range s.CatchBlock.Statements {
+			if err := g.generateStmt(subStmt); err != nil {
+				return err
+			}
+		}
+		g.indent--
+		g.writeIndent()
+		g.buf.WriteString("}\n")
+
+	case *ast.StructDecl:
+		g.generateStructDecl(s)
 	}
 	return nil
 }
@@ -309,6 +385,12 @@ func (g *Generator) generateExpr(expr ast.Expr) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if e.Operator == "/" {
+			return fmt.Sprintf("lcode_div(%s, %s)", left, right), nil
+		}
+		if e.Operator == "%" {
+			return fmt.Sprintf("lcode_mod(%s, %s)", left, right), nil
+		}
 		return fmt.Sprintf("(%s %s %s)", left, e.Operator, right), nil
 
 	case *ast.CallExpr:
@@ -340,6 +422,46 @@ func (g *Generator) generateExpr(expr ast.Expr) (string, error) {
 		}
 
 		return fmt.Sprintf("%s(%s)", callName, strings.Join(args, ", ")), nil
+
+	case *ast.ArrayLiteral:
+		elems := make([]string, 0, len(e.Elements))
+		for _, el := range e.Elements {
+			s, err := g.generateExpr(el)
+			if err != nil {
+				return "", err
+			}
+			elems = append(elems, s)
+		}
+		return fmt.Sprintf("std::vector<int64_t>{%s}", strings.Join(elems, ", ")), nil
+
+	case *ast.IndexExpr:
+		target, err := g.generateExpr(e.Left)
+		if err != nil {
+			return "", err
+		}
+		idx, err := g.generateExpr(e.Index)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s[%s]", target, idx), nil
+
+	case *ast.MemberExpr:
+		obj, err := g.generateExpr(e.Object)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s.%s", obj, e.Property.Value), nil
+
+	case *ast.StructLiteral:
+		assignments := make([]string, 0, len(e.Fields))
+		for fname, fexpr := range e.Fields {
+			fval, err := g.generateExpr(fexpr)
+			if err != nil {
+				return "", err
+			}
+			assignments = append(assignments, fmt.Sprintf("_s.%s = %s;", fname, fval))
+		}
+		return fmt.Sprintf("([&]{ %s _s{}; %s return _s; }())", e.Name.Value, strings.Join(assignments, " ")), nil
 	}
 
 	return "", fmt.Errorf("未知表达式类型: %T", expr)
@@ -373,7 +495,11 @@ func toCppType(lcodeType string) string {
 		return "bool"
 	case "void":
 		return "void"
-	default:
+	case "array":
+		return "std::vector<int64_t>"
+	case "any":
 		return "auto"
+	default:
+		return lcodeType
 	}
 }

@@ -1,0 +1,24 @@
+// ==============================================================================
+//  Lcode 标准文件系统库 (std/fs)
+//  提供后端持久化文件读取、写入、存在检测与删除功能
+// ==============================================================================
+
+// 读取指定路径的纯文本文件内容
+fn read_text(path: string) -> string {
+    return fs_read_text(path);
+}
+
+// 将文本字符串写入指定路径文件 (覆盖写入)
+fn write_text(path: string, content: string) -> bool {
+    return fs_write_text(path, content);
+}
+
+// 判断指定路径的文件是否存在
+fn exists(path: string) -> bool {
+    return fs_exists(path);
+}
+
+// 删除指定路径的文件
+fn remove(path: string) -> bool {
+    return fs_remove(path);
+}

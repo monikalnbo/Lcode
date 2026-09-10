@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
+	"os"
 	"strings"
 
 	"lcode/pkg/ast"
@@ -35,6 +37,42 @@ func (v StringValue) Type() string   { return "string" }
 type VoidValue struct{}
 func (v VoidValue) String() string { return "void" }
 func (v VoidValue) Type() string   { return "void" }
+
+// ArrayValue 动态数组值
+type ArrayValue struct {
+	Elements []Value
+}
+func (v *ArrayValue) String() string {
+	parts := make([]string, 0, len(v.Elements))
+	for _, el := range v.Elements {
+		parts = append(parts, el.String())
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+func (v *ArrayValue) Type() string { return "array" }
+
+// StructInstanceValue 自定义结构体实例
+type StructInstanceValue struct {
+	StructName string
+	Fields     map[string]Value
+}
+func (v *StructInstanceValue) String() string {
+	parts := make([]string, 0, len(v.Fields))
+	for k, val := range v.Fields {
+		parts = append(parts, fmt.Sprintf("%s: %s", k, val.String()))
+	}
+	return fmt.Sprintf("%s { %s }", v.StructName, strings.Join(parts, ", "))
+}
+func (v *StructInstanceValue) Type() string { return v.StructName }
+
+// BreakSignal 与 ContinueSignal 控制流跳转
+type BreakSignal struct{}
+func (b BreakSignal) String() string { return "break" }
+func (b BreakSignal) Type() string   { return "signal" }
+
+type ContinueSignal struct{}
+func (c ContinueSignal) String() string { return "continue" }
+func (c ContinueSignal) Type() string   { return "signal" }
 
 // ReturnValue 用于控制流返回包装
 type ReturnValue struct{ Value Value }
@@ -177,6 +215,73 @@ func (ev *Evaluator) Eval(node ast.Node, env *Environment) (Value, error) {
 	case *ast.BooleanLiteral:
 		return BoolValue{Value: n.Value}, nil
 
+	case *ast.ArrayLiteral:
+		elems := make([]Value, 0, len(n.Elements))
+		for _, el := range n.Elements {
+			v, err := ev.Eval(el, env)
+			if err != nil {
+				return nil, err
+			}
+			elems = append(elems, v)
+		}
+		return &ArrayValue{Elements: elems}, nil
+
+	case *ast.IndexExpr:
+		target, err := ev.Eval(n.Left, env)
+		if err != nil {
+			return nil, err
+		}
+		idxVal, err := ev.Eval(n.Index, env)
+		if err != nil {
+			return nil, err
+		}
+		idxInt, ok := idxVal.(IntValue)
+		if !ok {
+			return nil, fmt.Errorf("索引必须是整型")
+		}
+		idx := int(idxInt.Value)
+		if arr, ok := target.(*ArrayValue); ok {
+			if idx < 0 || idx >= len(arr.Elements) {
+				return nil, fmt.Errorf("数组索引越界: index %d, len %d", idx, len(arr.Elements))
+			}
+			return arr.Elements[idx], nil
+		}
+		if str, ok := target.(StringValue); ok {
+			runes := []rune(str.Value)
+			if idx < 0 || idx >= len(runes) {
+				return nil, fmt.Errorf("字符串索引越界: index %d, len %d", idx, len(runes))
+			}
+			return StringValue{Value: string(runes[idx])}, nil
+		}
+		return nil, fmt.Errorf("目标类型 %s 不支持索引访问", target.Type())
+
+	case *ast.MemberExpr:
+		target, err := ev.Eval(n.Object, env)
+		if err != nil {
+			return nil, err
+		}
+		if st, ok := target.(*StructInstanceValue); ok {
+			if val, ok := st.Fields[n.Property.Value]; ok {
+				return val, nil
+			}
+			return nil, fmt.Errorf("结构体 %s 没有字段 %q", st.StructName, n.Property.Value)
+		}
+		return nil, fmt.Errorf("无法在非结构体类型 %s 上访问属性 %q", target.Type(), n.Property.Value)
+
+	case *ast.StructLiteral:
+		fields := make(map[string]Value)
+		for fname, fexpr := range n.Fields {
+			fval, err := ev.Eval(fexpr, env)
+			if err != nil {
+				return nil, err
+			}
+			fields[fname] = fval
+		}
+		return &StructInstanceValue{
+			StructName: n.Name.Value,
+			Fields:     fields,
+		}, nil
+
 	case *ast.Identifier:
 		if val, ok := env.Get(n.Value); ok {
 			return val, nil
@@ -217,32 +322,89 @@ func (ev *Evaluator) Eval(node ast.Node, env *Environment) (Value, error) {
 		return initVal, nil
 
 	case *ast.AssignStmt:
-		ident, ok := n.Left.(*ast.Identifier)
-		if !ok {
-			return nil, fmt.Errorf("赋值目标必须为标识符")
-		}
 		rightVal, err := ev.Eval(n.Right, env)
 		if err != nil {
 			return nil, err
 		}
 
-		if n.Operator != "=" {
-			currVal, exists := env.Get(ident.Value)
-			if !exists {
-				return nil, fmt.Errorf("未定义的变量 %s", ident.Value)
+		switch lhs := n.Left.(type) {
+		case *ast.Identifier:
+			if n.Operator != "=" {
+				currVal, exists := env.Get(lhs.Value)
+				if !exists {
+					return nil, fmt.Errorf("未定义的变量 %s", lhs.Value)
+				}
+				rawOp := strings.TrimSuffix(n.Operator, "=")
+				newVal, err := ev.evalBinary(rawOp, currVal, rightVal)
+				if err != nil {
+					return nil, err
+				}
+				rightVal = newVal
 			}
-			rawOp := strings.TrimSuffix(n.Operator, "=")
-			newVal, err := ev.evalBinary(rawOp, currVal, rightVal)
+			if !env.Assign(lhs.Value, rightVal) {
+				env.Set(lhs.Value, rightVal)
+			}
+			return rightVal, nil
+
+		case *ast.IndexExpr:
+			target, err := ev.Eval(lhs.Left, env)
 			if err != nil {
 				return nil, err
 			}
-			rightVal = newVal
-		}
+			arr, ok := target.(*ArrayValue)
+			if !ok {
+				return nil, fmt.Errorf("只能对数组执行索引赋值")
+			}
+			idxVal, err := ev.Eval(lhs.Index, env)
+			if err != nil {
+				return nil, err
+			}
+			idxInt, ok := idxVal.(IntValue)
+			if !ok {
+				return nil, fmt.Errorf("数组索引必须为整型")
+			}
+			idx := int(idxInt.Value)
+			if idx < 0 || idx >= len(arr.Elements) {
+				return nil, fmt.Errorf("数组索引越界: index %d, len %d", idx, len(arr.Elements))
+			}
+			if n.Operator != "=" {
+				rawOp := strings.TrimSuffix(n.Operator, "=")
+				newVal, err := ev.evalBinary(rawOp, arr.Elements[idx], rightVal)
+				if err != nil {
+					return nil, err
+				}
+				rightVal = newVal
+			}
+			arr.Elements[idx] = rightVal
+			return rightVal, nil
 
-		if !env.Assign(ident.Value, rightVal) {
-			env.Set(ident.Value, rightVal)
+		case *ast.MemberExpr:
+			target, err := ev.Eval(lhs.Object, env)
+			if err != nil {
+				return nil, err
+			}
+			st, ok := target.(*StructInstanceValue)
+			if !ok {
+				return nil, fmt.Errorf("只能对结构体实例执行属性赋值")
+			}
+			if n.Operator != "=" {
+				currVal, ok := st.Fields[lhs.Property.Value]
+				if !ok {
+					return nil, fmt.Errorf("结构体 %s 没有字段 %q", st.StructName, lhs.Property.Value)
+				}
+				rawOp := strings.TrimSuffix(n.Operator, "=")
+				newVal, err := ev.evalBinary(rawOp, currVal, rightVal)
+				if err != nil {
+					return nil, err
+				}
+				rightVal = newVal
+			}
+			st.Fields[lhs.Property.Value] = rightVal
+			return rightVal, nil
+
+		default:
+			return nil, fmt.Errorf("非法赋值左值目标")
 		}
-		return rightVal, nil
 
 	case *ast.BlockStmt:
 		return ev.evalBlockStmt(n, env)
@@ -285,10 +447,66 @@ func (ev *Evaluator) Eval(node ast.Node, env *Environment) (Value, error) {
 			if err != nil {
 				return nil, err
 			}
+			if _, ok := res.(BreakSignal); ok {
+				break
+			}
+			if _, ok := res.(ContinueSignal); ok {
+				continue
+			}
 			if ret, ok := res.(ReturnValue); ok {
 				return ret, nil
 			}
 		}
+		return VoidValue{}, nil
+
+	case *ast.ForInStmt:
+		iterVal, err := ev.Eval(n.Iterable, env)
+		if err != nil {
+			return nil, err
+		}
+		arr, ok := iterVal.(*ArrayValue)
+		if !ok {
+			return nil, fmt.Errorf("for ... in 只能遍历 array, 遇到 %s", iterVal.Type())
+		}
+		for _, item := range arr.Elements {
+			loopEnv := NewEnvironment(env, env.stdout)
+			loopEnv.Set(n.VarName.Value, item)
+			res, err := ev.evalBlockStmt(n.Body, loopEnv)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := res.(BreakSignal); ok {
+				break
+			}
+			if _, ok := res.(ContinueSignal); ok {
+				continue
+			}
+			if ret, ok := res.(ReturnValue); ok {
+				return ret, nil
+			}
+		}
+		return VoidValue{}, nil
+
+	case *ast.BreakStmt:
+		return BreakSignal{}, nil
+
+	case *ast.ContinueStmt:
+		return ContinueSignal{}, nil
+
+	case *ast.TryCatchStmt:
+		tryEnv := NewEnvironment(env, env.stdout)
+		res, err := ev.evalBlockStmt(n.TryBlock, tryEnv)
+		if err != nil {
+			// 捕获异常，容错恢复
+			catchEnv := NewEnvironment(env, env.stdout)
+			if n.ErrVar != nil {
+				catchEnv.Set(n.ErrVar.Value, StringValue{Value: err.Error()})
+			}
+			return ev.evalBlockStmt(n.CatchBlock, catchEnv)
+		}
+		return res, nil
+
+	case *ast.StructDecl:
 		return VoidValue{}, nil
 
 	case *ast.ReturnStmt:
@@ -309,6 +527,9 @@ func (ev *Evaluator) Eval(node ast.Node, env *Environment) (Value, error) {
 }
 
 func (ev *Evaluator) evalBlockStmt(block *ast.BlockStmt, env *Environment) (Value, error) {
+	if block == nil {
+		return VoidValue{}, nil
+	}
 	subEnv := NewEnvironment(env, env.stdout)
 	defer func() {
 		// Rust 风格 RAII: 当前代码块作用域退出，自动 Drop 析构本块内持有的未释放堆资源
@@ -323,6 +544,12 @@ func (ev *Evaluator) evalBlockStmt(block *ast.BlockStmt, env *Environment) (Valu
 		res, err := ev.Eval(stmt, subEnv)
 		if err != nil {
 			return nil, err
+		}
+		if _, ok := res.(BreakSignal); ok {
+			return res, nil
+		}
+		if _, ok := res.(ContinueSignal); ok {
+			return res, nil
 		}
 		if ret, ok := res.(ReturnValue); ok {
 			// 如果返回的是句柄值，发生所有权逃逸转移给父级环境，当前作用域不提前 drop！
@@ -721,6 +948,251 @@ func (ev *Evaluator) evalBuiltinCall(name string, call *ast.CallExpr, env *Envir
 			_, _ = env.stdout.Write([]byte("✓ 内存泄漏检查: 零泄漏，所有分配已安全释放\n"))
 		}
 		return IntValue{Value: int64(len(leaks))}, true, nil
+
+	// 后端核心内建：数组与切片操作
+	case "range":
+		var start, end int64 = 0, 0
+		if len(call.Arguments) == 1 {
+			v, err := ev.Eval(call.Arguments[0], env)
+			if err != nil {
+				return nil, true, err
+			}
+			iv, ok := v.(IntValue)
+			if !ok {
+				return nil, true, fmt.Errorf("range 参数必须为 int")
+			}
+			end = iv.Value
+		} else if len(call.Arguments) >= 2 {
+			v1, err := ev.Eval(call.Arguments[0], env)
+			if err != nil {
+				return nil, true, err
+			}
+			v2, err := ev.Eval(call.Arguments[1], env)
+			if err != nil {
+				return nil, true, err
+			}
+			iv1, ok1 := v1.(IntValue)
+			iv2, ok2 := v2.(IntValue)
+			if !ok1 || !ok2 {
+				return nil, true, fmt.Errorf("range 参数必须为 int")
+			}
+			start = iv1.Value
+			end = iv2.Value
+		}
+		count := int(end - start)
+		if count < 0 {
+			count = 0
+		}
+		elems := make([]Value, 0, count)
+		for i := start; i < end; i++ {
+			elems = append(elems, IntValue{Value: i})
+		}
+		return &ArrayValue{Elements: elems}, true, nil
+
+	case "len":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("len 期望 1 个参数")
+		}
+		v, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		if arr, ok := v.(*ArrayValue); ok {
+			return IntValue{Value: int64(len(arr.Elements))}, true, nil
+		}
+		if str, ok := v.(StringValue); ok {
+			return IntValue{Value: int64(len([]rune(str.Value)))}, true, nil
+		}
+		return nil, true, fmt.Errorf("len 期望 array 或 string, 遇到 %s", v.Type())
+
+	case "append", "push":
+		if len(call.Arguments) < 2 {
+			return nil, true, fmt.Errorf("%s 期望 2 个参数 (arr, val)", name)
+		}
+		target, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		arr, ok := target.(*ArrayValue)
+		if !ok {
+			return nil, true, fmt.Errorf("%s 第 1 个参数必须是 array", name)
+		}
+		val, err := ev.Eval(call.Arguments[1], env)
+		if err != nil {
+			return nil, true, err
+		}
+		arr.Elements = append(arr.Elements, val)
+		return arr, true, nil
+
+	case "pop":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("pop 期望 1 个参数 (arr)")
+		}
+		target, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		arr, ok := target.(*ArrayValue)
+		if !ok {
+			return nil, true, fmt.Errorf("pop 参数必须是 array")
+		}
+		if len(arr.Elements) == 0 {
+			return nil, true, fmt.Errorf("pop 错误: 数组为空")
+		}
+		last := arr.Elements[len(arr.Elements)-1]
+		arr.Elements = arr.Elements[:len(arr.Elements)-1]
+		return last, true, nil
+
+	// 后端核心内建：文件 IO (std/fs)
+	case "fs_read_text":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("fs_read_text 需要文件路径")
+		}
+		pVal, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		b, err := os.ReadFile(pVal.String())
+		if err != nil {
+			return nil, true, fmt.Errorf("读取文件失败 %q: %v", pVal.String(), err)
+		}
+		return StringValue{Value: string(b)}, true, nil
+
+	case "fs_write_text":
+		if len(call.Arguments) < 2 {
+			return nil, true, fmt.Errorf("fs_write_text 需要 (path, text)")
+		}
+		pVal, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		tVal, err := ev.Eval(call.Arguments[1], env)
+		if err != nil {
+			return nil, true, err
+		}
+		err = os.WriteFile(pVal.String(), []byte(tVal.String()), 0644)
+		if err != nil {
+			return BoolValue{Value: false}, true, fmt.Errorf("写入文件失败 %q: %v", pVal.String(), err)
+		}
+		return BoolValue{Value: true}, true, nil
+
+	case "fs_exists":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("fs_exists 需要文件路径")
+		}
+		pVal, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		_, err = os.Stat(pVal.String())
+		return BoolValue{Value: err == nil}, true, nil
+
+	case "fs_remove":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("fs_remove 需要文件路径")
+		}
+		pVal, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		err = os.Remove(pVal.String())
+		return BoolValue{Value: err == nil}, true, nil
+
+	// 后端核心内建：字符串处理 (std/str)
+	case "str_len":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("str_len 需要 1 个参数")
+		}
+		v, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		return IntValue{Value: int64(len([]rune(v.String())))}, true, nil
+
+	case "str_contains":
+		if len(call.Arguments) < 2 {
+			return nil, true, fmt.Errorf("str_contains 需要 2 个参数")
+		}
+		s1, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		s2, err := ev.Eval(call.Arguments[1], env)
+		if err != nil {
+			return nil, true, err
+		}
+		return BoolValue{Value: strings.Contains(s1.String(), s2.String())}, true, nil
+
+	case "str_split":
+		if len(call.Arguments) < 2 {
+			return nil, true, fmt.Errorf("str_split 需要 (s, sep)")
+		}
+		s1, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		s2, err := ev.Eval(call.Arguments[1], env)
+		if err != nil {
+			return nil, true, err
+		}
+		splits := strings.Split(s1.String(), s2.String())
+		elems := make([]Value, 0, len(splits))
+		for _, sp := range splits {
+			elems = append(elems, StringValue{Value: sp})
+		}
+		return &ArrayValue{Elements: elems}, true, nil
+
+	case "str_trim":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("str_trim 需要 1 个参数")
+		}
+		v, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		return StringValue{Value: strings.TrimSpace(v.String())}, true, nil
+
+	case "str_upper":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("str_upper 需要 1 个参数")
+		}
+		v, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		return StringValue{Value: strings.ToUpper(v.String())}, true, nil
+
+	case "str_lower":
+		if len(call.Arguments) < 1 {
+			return nil, true, fmt.Errorf("str_lower 需要 1 个参数")
+		}
+		v, err := ev.Eval(call.Arguments[0], env)
+		if err != nil {
+			return nil, true, err
+		}
+		return StringValue{Value: strings.ToLower(v.String())}, true, nil
+
+	// 后端核心内建：随机数 (std/random)
+	case "random_int":
+		var minVal, maxVal int64 = 0, 100
+		if len(call.Arguments) >= 2 {
+			v1, _ := ev.Eval(call.Arguments[0], env)
+			v2, _ := ev.Eval(call.Arguments[1], env)
+			if iv1, ok := v1.(IntValue); ok {
+				minVal = iv1.Value
+			}
+			if iv2, ok := v2.(IntValue); ok {
+				maxVal = iv2.Value
+			}
+		}
+		if maxVal <= minVal {
+			return IntValue{Value: minVal}, true, nil
+		}
+		n := rand.Int63n(maxVal-minVal) + minVal
+		return IntValue{Value: n}, true, nil
+
+	case "random_float":
+		return FloatValue{Value: rand.Float64()}, true, nil
 	}
 
 	if strings.HasPrefix(name, "cpp_") {
