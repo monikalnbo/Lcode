@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"lcode/pkg/complete"
 	"lcode/pkg/eval"
 	"lcode/pkg/lexer"
 	"lcode/pkg/parser"
@@ -38,10 +39,18 @@ func RunREPL() {
 		}
 		if line == ":help" {
 			fmt.Println(ColorCyan + "REPL 命令列表:" + Reset)
-			fmt.Println("  :help      显示此帮助")
-			fmt.Println("  :tokens    输入代码并显示 Tokens 表")
-			fmt.Println("  :ast       输入代码并显示彩色 AST")
-			fmt.Println("  exit       退出 REPL")
+			fmt.Println("  :help             显示此帮助")
+			fmt.Println("  :c <prefix>       查询指定前缀的智能补全候选项")
+			fmt.Println("  :tokens <expr>    显示词法单元 Token 流")
+			fmt.Println("  :ast <expr>       显示彩色语法树 AST")
+			fmt.Println("  exit              退出 REPL")
+			continue
+		}
+
+		// 自动补全命令支持: :c <prefix> 或 ? <prefix>
+		if strings.HasPrefix(line, ":c ") || strings.HasPrefix(line, "? ") {
+			prefix := strings.TrimSpace(line[3:])
+			RenderCompletionList(prefix)
 			continue
 		}
 
@@ -73,4 +82,34 @@ func RunREPL() {
 			fmt.Print(FgHiWhite + out + Reset)
 		}
 	}
+}
+
+// RenderCompletionList 美化打印自动补全候选项
+func RenderCompletionList(prefix string) {
+	engine := complete.NewEngine()
+	items := engine.Complete("", prefix)
+	if len(items) == 0 {
+		fmt.Printf("%s未找到匹配前缀 %q 的补全建议%s\n", ColorMuted, prefix, Reset)
+		return
+	}
+
+	fmt.Printf("\n%s[智能自动补全建议] 前缀 %q 匹配到 %d 项:%s\n", ColorCyan+Bold, prefix, len(items), Reset)
+	for _, it := range items {
+		kindColor := ColorViolet
+		if it.Kind == "Type" {
+			kindColor = ColorEmerald
+		} else if it.Kind == "Function" {
+			kindColor = ColorAmber
+		} else if it.Kind == "Module" {
+			kindColor = ColorRose
+		}
+		badge := Paint(kindColor, fmt.Sprintf("[%-8s]", it.Kind))
+		fmt.Printf("  • %s%-16s%s %s  %s%-28s%s %s%s%s\n",
+			Bold+FgHiWhite, it.Label, Reset,
+			badge,
+			ColorCyan, it.Detail, Reset,
+			ColorMuted, it.Documentation, Reset,
+		)
+	}
+	fmt.Println()
 }

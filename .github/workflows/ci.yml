@@ -34,9 +34,17 @@ jobs:
         run: |
           ./bin/lcode studio examples/hello.lc
 
-      - name: 运行斐波那契递归程序 (fibonacci.lc)
+      - name: 运行极简语法与智能缩写演示 (concise_demo.lc)
         run: |
-          ./bin/lcode run examples/fibonacci.lc
+          ./bin/lcode run examples/concise_demo.lc
+
+      - name: 运行高级错误处理、内存与栈技术演示 (error_demo.lc)
+        run: |
+          ./bin/lcode run examples/error_demo.lc
+
+      - name: 运行内置 C++ 核心库混合加速演示 (cpp_demo.lc)
+        run: |
+          ./bin/lcode run examples/cpp_demo.lc
 
       - name: 上传编译产物 (Binaries)
         uses: actions/upload-artifact@v4

@@ -1,0 +1,33 @@
+// ==============================================================================
+//  Lcode 标准错误处理库 (std/error)
+//  提供异常判定、断言测试与堆栈错误诊断功能
+// ==============================================================================
+
+// 判定条件必须为真，否则触发运行时恐慌中断并打印调用栈
+fn assert_true(condition: bool, message: string) -> void {
+    assert(condition, message);
+}
+
+// 判定两个整数必须相等
+fn assert_eq(actual: int, expected: int, message: string) -> void {
+    if actual != expected {
+        panic(message);
+    }
+}
+
+// 判定两个字符串必须相等
+fn assert_str_eq(actual: string, expected: string, message: string) -> void {
+    if actual != expected {
+        panic(message);
+    }
+}
+
+// 判定状态码是否成功 (0 表示成功)
+fn is_ok(statusCode: int) -> bool {
+    return statusCode == 0;
+}
+
+// 判定状态码是否为错误 (!= 0 表示错误)
+fn is_err(statusCode: int) -> bool {
+    return statusCode != 0;
+}

@@ -1,9 +1,106 @@
-// 编译器错误诊断测试样例
-// 包含不可变变量非法修改与类型不匹配
+// ==============================================================================
+//  Lcode 高级特性演示程序: 错误处理 + 时间管理 + 内存管理 + 调用栈技术
+// ==============================================================================
 
-fn main() {
-    let pi = 3.14;
-    pi = 3.0; // 错误：无法给不可变变量 pi 重新赋值
+import "std/error";
+import "std/time";
+import "std/mem";
 
-    let count: int = "hello"; // 错误：类型不匹配
+// 深度嵌套函数，用于演示运行时调用栈帧与追踪
+fn deep_calc(level: int, value: int) -> int {
+    if level >= 3 {
+        // 在调用栈顶层输出当前完整栈帧结构
+        println("🥞 调用栈已达深度:", stack_depth());
+        stack_dump();
+        return value * 2;
+    }
+    return deep_calc(level + 1, value + 10);
+}
+
+// 模拟带有错误码与边界检查的安全除法运算
+fn safe_divide(numerator: int, denominator: int) -> int {
+    // 判定分母不能为零
+    if denominator == 0 {
+        println("❌ 错误: 分母不可为零！");
+        return -1; // 约定 -1 为错误状态码
+    }
+    return numerator / denominator;
+}
+
+fn main() -> void {
+    println("==================================================");
+    println("🚀 Lcode 现代化运行时技术矩阵综合演示");
+    println("==================================================");
+
+    // -------------------------------------------------------------
+    // 1. 高精度时间管理 (Time Management)
+    // -------------------------------------------------------------
+    println("\n[1. 时间管理与耗时基准]");
+    println("当前系统格式化时间:", format_now());
+    let t_start = now_ms();
+
+    // 模拟一段计算任务
+    mut sum = 0;
+    mut i = 0;
+    while i < 10000 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    let elapsed = elapsed_ms(t_start);
+    println("累加求和结果:", sum);
+    println("微型计算耗时 (毫秒):", elapsed);
+
+    // -------------------------------------------------------------
+    // 2. 虚拟堆内存管理与泄漏检测 (Memory Management)
+    // -------------------------------------------------------------
+    println("\n[2. 堆内存分配与生命周期管控]");
+    // 分配一个拥有 4 个 64-bit 元素的连续堆内存块
+    let ptr = alloc(4);
+    println("成功分配虚拟内存块，分配句柄:", ptr);
+
+    // 写入数据
+    write(ptr, 0, 1024);
+    write(ptr, 1, 2048);
+    write(ptr, 2, 4096);
+
+    // 读取验证
+    let val0 = read(ptr, 0);
+    let val2 = read(ptr, 2);
+    println("内存句柄 [0x400] 偏移 0 的值:", val0);
+    println("内存句柄 [0x400] 偏移 2 的值:", val2);
+
+    // 打印当前内存统计信息
+    stats();
+
+    // 释放内存
+    free(ptr);
+    println("已安全释放内存句柄:", ptr);
+
+    // 检测是否有未回收的内存泄漏
+    let leakCount = check_leaks();
+    println("内存泄漏检测完成，未回收块数量:", leakCount);
+
+    // -------------------------------------------------------------
+    // 3. 栈技术与栈帧追踪 (Call Stack Technology)
+    // -------------------------------------------------------------
+    println("\n[3. 运行时调用栈递归与帧检查]");
+    let calc_result = deep_calc(1, 100);
+    println("多层调用计算最终返回值:", calc_result);
+
+    // -------------------------------------------------------------
+    // 4. 错误处理与断言控制 (Error Handling & Assertions)
+    // -------------------------------------------------------------
+    println("\n[4. 错误判断与断言校验]");
+    let ok_res = safe_divide(100, 5);
+    println("safe_divide(100, 5) 结果:", ok_res);
+    assert_true(ok_res == 20, "除法计算结果必须等于 20");
+    println("✓ 断言 1: 计算结果准确性校验通过！");
+
+    let err_res = safe_divide(100, 0);
+    println("safe_divide(100, 0) 状态码:", err_res);
+    if is_err(err_res) {
+        println("✓ 错误检测成功: 妥善捕获到除以零边界异常！");
+    }
+
+    println("\n🎉 所有时间、内存、栈与错误控制模块全部运行成功！");
 }

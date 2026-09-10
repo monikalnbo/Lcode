@@ -1,0 +1,34 @@
+// ==============================================================================
+//  Lcode 标准时间管理库 (std/time)
+//  提供系统高精度时间戳、执行耗时基准统计与休眠控制
+// ==============================================================================
+
+// 获取当前 Unix 时间戳 (毫秒)
+fn now_ms() -> int {
+    return time_now_ms();
+}
+
+// 获取当前 Unix 时间戳 (秒)
+fn now_secs() -> int {
+    return time_now_secs();
+}
+
+// 获取当前 Unix 时间戳 (微秒)
+fn now_micros() -> int {
+    return time_now_micros();
+}
+
+// 线程睡眠指定毫秒数
+fn sleep_ms(ms: int) -> void {
+    time_sleep_ms(ms);
+}
+
+// 计算从 start_ms 起至今经历的毫秒数
+fn elapsed_ms(start_ms: int) -> int {
+    return time_elapsed_ms(start_ms);
+}
+
+// 格式化获取当前时间字符串
+fn format_now() -> string {
+    return time_format_now();
+}

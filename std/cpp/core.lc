@@ -1,0 +1,75 @@
+// ==============================================================================
+//  Lcode 内置高性能 C++ 核心库绑定 (std/cpp/core)
+//  提供极速底层数学计算与经典算法，支持解释模式与 C++ 转译编译双通道
+// ==============================================================================
+
+// 计算浮点数极速开方 (C++ 底层加速)
+fn cpp_fast_sqrt(x: float) -> float {
+    return 0.0;
+}
+
+// 计算浮点数高精度快速幂
+fn cpp_pow(base: float, exp: float) -> float {
+    return 0.0;
+}
+
+// 计算64位整型绝对值
+fn cpp_abs(x: int) -> int {
+    if x < 0 {
+        return -x;
+    }
+    return x;
+}
+
+// 欧几里得辗转相除求最大公约数
+fn cpp_gcd(a: int, b: int) -> int {
+    mut x = a;
+    mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+// 计算第 n 项斐波那契数 (快速递推)
+fn cpp_fibonacci(n: int) -> int {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    mut a = 0;
+    mut b = 1;
+    mut i = 2;
+    while i <= n {
+        let temp = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    return b;
+}
+
+// 判断给定整数是否为素数
+fn cpp_is_prime(n: int) -> bool {
+    if n <= 1 {
+        return false;
+    }
+    if n <= 3 {
+        return true;
+    }
+    if n % 2 == 0 || n % 3 == 0 {
+        return false;
+    }
+    mut i = 5;
+    while i * i <= n {
+        if n % i == 0 || n % (i + 2) == 0 {
+            return false;
+        }
+        i = i + 6;
+    }
+    return true;
+}

@@ -1,0 +1,40 @@
+// ==============================================================================
+//  Lcode 极简高效语法与智能缩写演示程序 (examples/concise_demo.lc)
+//  支持：prin (缩写为 print), p (缩写为 println), ret (缩写为 return)
+//  以及函数的最短唯一前缀智能解析！
+// ==============================================================================
+
+// 使用 'fun' 替代 'fn', 使用 'ret' 替代 'return'
+fun add_multiplier(a: int, b: int) -> int {
+    ret (a + b) * 10;
+}
+
+// 具有长名字的函数，支持唯一前缀缩写调用
+fun calculate_trajectory_hypotenuse(x: int, y: int) -> int {
+    ret x * x + y * y;
+}
+
+fun main() -> void {
+    p("==================================================");
+    p("⚡ Lcode 极简高效语法与智能缩写演示");
+    p("==================================================");
+
+    // 1. prin 替代 print (不换行输出)
+    prin("正在计算中... [");
+    prin("■■■■■■■■■■");
+    p("] 100% 完成！");
+
+    // 2. p 替代 println (换行输出)
+    p("欢迎体验 Lcode 极简编写哲学！");
+
+    // 3. 关键字缩写 ret
+    let num = add_multiplier(3, 4);
+    p("add_multiplier(3, 4) =", num);
+
+    // 4. 最短唯一前缀推导：
+    // calculate_trajectory_hypotenuse 可直接用 calculate_trajectory 简写调用！
+    let hyp = calculate_trajectory(3, 4);
+    p("calculate_trajectory(3, 4) 平方和 =", hyp);
+
+    p("\n✓ 所有缩写与极简语法均被编译器内核无损解析！");
+}

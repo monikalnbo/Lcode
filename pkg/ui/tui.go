@@ -7,6 +7,7 @@ import (
 
 	"lcode/pkg/eval"
 	"lcode/pkg/lexer"
+	"lcode/pkg/mod"
 	"lcode/pkg/parser"
 	"lcode/pkg/sema"
 	"lcode/pkg/token"
@@ -39,6 +40,16 @@ func RunStudio(filename string, sourceCode string) {
 	p := parser.New(l2)
 	prog := p.ParseProgram()
 	parseDuration := time.Since(startParse)
+
+	// 3.1 模块与依赖解析 (Module Resolution)
+	if len(prog.Imports) > 0 && len(p.Errors()) == 0 {
+		resolver := mod.NewResolver(".", "std")
+		if merged, err := resolver.ResolveAll(filename, prog); err == nil {
+			prog = merged
+		} else {
+			p.AppendError(err.Error())
+		}
+	}
 
 	// 4. 语义分析 (Sema)
 	startSema := time.Now()
@@ -96,6 +107,21 @@ func RunStudio(filename string, sourceCode string) {
 	}
 
 	fmt.Println(BoxWithTitle("💻 控制台输出 (Program Terminal Output)", termContent.String(), ColorAmber))
+
+	// 10. 运行时堆内存追踪与监控卡片 (如果存在内存分配)
+	if evaluator.MemManager != nil && evaluator.MemManager.Stats().AllocCount > 0 {
+		fmt.Println()
+		memBox := RenderMemoryStatsBox(evaluator.MemManager.Stats(), evaluator.MemManager.CheckLeaks())
+		fmt.Println(memBox)
+	}
+
+	// 11. 如果发生异常或 Panic，输出完整的调用栈回溯卡片
+	if err != nil && evaluator.CallStack != nil && evaluator.CallStack.Depth() > 0 {
+		fmt.Println()
+		panicCard := RenderPanicCard("运行时异常中断", err.Error(), evaluator.CallStack.Frames())
+		fmt.Println(panicCard)
+	}
+
 	fmt.Println()
 }
 

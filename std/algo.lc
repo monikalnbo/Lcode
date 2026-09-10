@@ -1,0 +1,26 @@
+// Lcode 标准库: 算法与数论模块 (std/algo)
+
+fn gcd(a: int, b: int) -> int {
+    mut x = a;
+    mut y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+fn is_prime(n: int) -> bool {
+    if n <= 1 {
+        return false;
+    }
+    mut d = 2;
+    while d * d <= n {
+        if n % d == 0 {
+            return false;
+        }
+        d += 1;
+    }
+    return true;
+}

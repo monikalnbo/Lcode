@@ -1,0 +1,42 @@
+// Lcode 标准库: 基础数学运算模块 (std/math)
+
+fn abs(x: int) -> int {
+    if x < 0 {
+        return -x;
+    }
+    return x;
+}
+
+fn max(a: int, b: int) -> int {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+fn min(a: int, b: int) -> int {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn pow(base: int, exp: int) -> int {
+    mut res = 1;
+    mut i = 0;
+    while i < exp {
+        res = res * base;
+        i += 1;
+    }
+    return res;
+}
+
+fn clamp(val: int, low: int, high: int) -> int {
+    if val < low {
+        return low;
+    }
+    if val > high {
+        return high;
+    }
+    return val;
+}

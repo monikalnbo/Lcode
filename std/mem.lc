@@ -1,0 +1,34 @@
+// ==============================================================================
+//  Lcode 标准内存管理库 (std/mem)
+//  提供虚拟堆内存分配、读写访问、释放与内存泄漏诊断机制
+// ==============================================================================
+
+// 分配指定字长的连续虚拟内存块，返回唯一内存句柄
+fn alloc(size: int) -> int {
+    return mem_alloc(size);
+}
+
+// 释放指定句柄的虚拟内存块 (具备双重释放检测)
+fn free(handle: int) -> int {
+    return mem_free(handle);
+}
+
+// 向内存块指定偏移写入 64 位整数值 (具备越界与释放后使用检查)
+fn write(handle: int, offset: int, value: int) -> void {
+    mem_write(handle, offset, value);
+}
+
+// 从内存块指定偏移读取 64 位整数值
+fn read(handle: int, offset: int) -> int {
+    return mem_read(handle, offset);
+}
+
+// 打印当前系统堆内存分配统计信息
+fn stats() -> void {
+    mem_stats();
+}
+
+// 检查是否存在未回收的内存泄漏块，返回泄漏块总数
+fn check_leaks() -> int {
+    return mem_check_leaks();
+}

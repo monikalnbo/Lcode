@@ -23,6 +23,7 @@ go.work
 *.swp
 *.swo
 
-# OS files
-Thumbs.db
-.DS_Store
+# Build artifacts
+bin/
+build/
+

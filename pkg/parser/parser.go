@@ -102,6 +102,10 @@ func (p *Parser) Errors() []string {
 	return p.errors
 }
 
+func (p *Parser) AppendError(msg string) {
+	p.errors = append(p.errors, msg)
+}
+
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
@@ -155,12 +159,18 @@ func (p *Parser) registerInfix(tokenType token.TokenType, fn infixParseFn) {
 // ParseProgram 解析整个文件程序
 func (p *Parser) ParseProgram() *ast.Program {
 	program := &ast.Program{
-		Decls: make([]ast.Decl, 0),
-		Stmts: make([]ast.Stmt, 0),
+		Imports: make([]*ast.ImportDecl, 0),
+		Decls:   make([]ast.Decl, 0),
+		Stmts:   make([]ast.Stmt, 0),
 	}
 
 	for !p.curTokenIs(token.EOF) {
-		if p.curTokenIs(token.FN) || p.curTokenIs(token.FUNC) {
+		if p.curTokenIs(token.IMPORT) {
+			imp := p.parseImportDecl()
+			if imp != nil {
+				program.Imports = append(program.Imports, imp)
+			}
+		} else if p.curTokenIs(token.FN) || p.curTokenIs(token.FUNC) {
 			decl := p.parseFuncDecl()
 			if decl != nil {
 				program.Decls = append(program.Decls, decl)
@@ -175,6 +185,31 @@ func (p *Parser) ParseProgram() *ast.Program {
 	}
 
 	return program
+}
+
+// parseImportDecl 解析 import "path" [as alias];
+func (p *Parser) parseImportDecl() *ast.ImportDecl {
+	decl := &ast.ImportDecl{Token: p.curToken}
+
+	if !p.expectPeek(token.STRING) {
+		return nil
+	}
+	decl.Path = p.curToken.Literal
+
+	// 可选别名: import "path" as alias;
+	if p.peekTokenIs(token.AS) {
+		p.nextToken() // 吃掉 as
+		if !p.expectPeek(token.IDENT) {
+			return nil
+		}
+		decl.Alias = p.curToken.Literal
+	}
+
+	if p.peekTokenIs(token.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return decl
 }
 
 // parseStatement 解析一条语句

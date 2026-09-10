@@ -91,6 +91,8 @@ const (
 	TRUE     TokenType = "true"
 	FALSE    TokenType = "false"
 	NIL      TokenType = "nil"
+	IMPORT   TokenType = "import"
+	AS       TokenType = "as"
 )
 
 // Token 结构体表示一个具体的词法单元
@@ -107,6 +109,7 @@ func (t Token) String() string {
 // keywords 映射关键字字面量到其 TokenType
 var keywords = map[string]TokenType{
 	"fn":       FN,
+	"fun":      FN,
 	"func":     FUNC,
 	"let":      LET,
 	"mut":      MUT,
@@ -117,11 +120,15 @@ var keywords = map[string]TokenType{
 	"while":    WHILE,
 	"for":      FOR,
 	"return":   RETURN,
+	"ret":      RETURN,
 	"break":    BREAK,
 	"continue": CONTINUE,
 	"true":     TRUE,
 	"false":    FALSE,
 	"nil":      NIL,
+	"import":   IMPORT,
+	"imp":      IMPORT,
+	"as":       AS,
 }
 
 // LookupIdent 检查标识符是否为关键字

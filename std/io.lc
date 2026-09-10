@@ -1,0 +1,11 @@
+// Lcode 标准库: 终端输出与格式化模块 (std/io)
+
+fn print_header(title: string) {
+    println("====================================");
+    println("  ", title);
+    println("====================================");
+}
+
+fn print_metric(name: string, value: int) {
+    println("[METRIC] ", name, " = ", value);
+}

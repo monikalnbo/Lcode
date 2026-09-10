@@ -23,6 +23,9 @@ func Walk(v Visitor, node Node) {
 
 	switch n := node.(type) {
 	case *Program:
+		for _, imp := range n.Imports {
+			Walk(w, imp)
+		}
 		for _, decl := range n.Decls {
 			Walk(w, decl)
 		}
@@ -130,6 +133,9 @@ func (d *TreeDumper) dump(node Node) {
 	case *Program:
 		d.sb.WriteString(fmt.Sprintf("%sProgram\n", prefix))
 		d.depth++
+		for _, imp := range n.Imports {
+			d.dump(imp)
+		}
 		for _, decl := range n.Decls {
 			d.dump(decl)
 		}
@@ -137,6 +143,13 @@ func (d *TreeDumper) dump(node Node) {
 			d.dump(stmt)
 		}
 		d.depth--
+
+	case *ImportDecl:
+		aliasStr := ""
+		if n.Alias != "" {
+			aliasStr = fmt.Sprintf(" as %s", n.Alias)
+		}
+		d.sb.WriteString(fmt.Sprintf("%sImport %q%s (%s)\n", prefix, n.Path, aliasStr, n.Pos()))
 
 	case *FuncDecl:
 		ret := "void"

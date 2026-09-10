@@ -38,11 +38,15 @@ type Decl interface {
 
 // Program 代表整个源文件的 AST 根
 type Program struct {
-	Decls []Decl
-	Stmts []Stmt
+	Imports []*ImportDecl
+	Decls   []Decl
+	Stmts   []Stmt
 }
 
 func (p *Program) Pos() token.Position {
+	if len(p.Imports) > 0 {
+		return p.Imports[0].Pos()
+	}
 	if len(p.Decls) > 0 {
 		return p.Decls[0].Pos()
 	}
@@ -54,6 +58,9 @@ func (p *Program) Pos() token.Position {
 
 func (p *Program) String() string {
 	var out bytes.Buffer
+	for _, imp := range p.Imports {
+		out.WriteString(imp.String() + "\n")
+	}
 	for _, d := range p.Decls {
 		out.WriteString(d.String() + "\n")
 	}
@@ -61,6 +68,23 @@ func (p *Program) String() string {
 		out.WriteString(s.String() + "\n")
 	}
 	return out.String()
+}
+
+// ImportDecl 模块导入声明 (import "std/math"; 或 import "std/math" as m;)
+type ImportDecl struct {
+	Token token.Token // 'import'
+	Path  string      // 导入路径，如 "std/math" 或 "./utils.lc"
+	Alias string      // 可选别名
+}
+
+func (id *ImportDecl) Pos() token.Position { return id.Token.Pos }
+func (id *ImportDecl) declNode()           {}
+func (id *ImportDecl) stmtNode()           {}
+func (id *ImportDecl) String() string {
+	if id.Alias != "" {
+		return fmt.Sprintf("import %q as %s;", id.Path, id.Alias)
+	}
+	return fmt.Sprintf("import %q;", id.Path)
 }
 
 // ==========================================

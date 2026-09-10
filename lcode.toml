@@ -1,0 +1,18 @@
+[package]
+name = "LcodeProject"
+version = "0.1.0"
+authors = ["lnbo <lnbo@users.noreply.github.com>"]
+description = "Lcode 模块化工程项目示例"
+entry = "examples/hello.lc"
+
+[dependencies]
+# 声明使用的标准库或第三方库
+"std/math" = "latest"
+"std/algo" = "latest"
+"std/io"   = "latest"
+"std/cpp"  = "builtin"
+
+[build]
+target = "native" # 支持 "native" 或 "cpp"
+opt_level = 2
+output = "bin/app"

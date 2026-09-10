@@ -19,27 +19,45 @@ type SemanticAnalyzer struct {
 func NewAnalyzer() *SemanticAnalyzer {
 	global := NewScope(nil)
 
-	// 注册内置函数 print(string) -> void
-	_ = global.Define(&Symbol{
-		Name: "print",
-		Kind: SymFunc,
-		Type: &FuncType{
-			ParamTypes: []Type{TypeString},
-			ReturnType: TypeVoid,
-		},
-		Pos: token.Position{Filename: "<builtin>"},
-	})
+	defBuiltin := func(name string, params []Type, ret Type) {
+		_ = global.Define(&Symbol{
+			Name: name,
+			Kind: SymFunc,
+			Type: &FuncType{
+				ParamTypes: params,
+				ReturnType: ret,
+			},
+			Pos: token.Position{Filename: "<builtin>"},
+		})
+	}
 
-	// 注册内置函数 println(string) -> void
-	_ = global.Define(&Symbol{
-		Name: "println",
-		Kind: SymFunc,
-		Type: &FuncType{
-			ParamTypes: []Type{TypeString},
-			ReturnType: TypeVoid,
-		},
-		Pos: token.Position{Filename: "<builtin>"},
-	})
+	// 基础 IO
+	defBuiltin("print", []Type{TypeString}, TypeVoid)
+	defBuiltin("println", []Type{TypeString}, TypeVoid)
+
+	// 错误与断言
+	defBuiltin("panic", []Type{TypeString}, TypeVoid)
+	defBuiltin("assert", []Type{TypeBool, TypeString}, TypeVoid)
+
+	// 栈技术
+	defBuiltin("stack_dump", []Type{}, TypeVoid)
+	defBuiltin("stack_depth", []Type{}, TypeInt)
+
+	// 时间管理
+	defBuiltin("time_now_ms", []Type{}, TypeInt)
+	defBuiltin("time_now_secs", []Type{}, TypeInt)
+	defBuiltin("time_now_micros", []Type{}, TypeInt)
+	defBuiltin("time_sleep_ms", []Type{TypeInt}, TypeVoid)
+	defBuiltin("time_elapsed_ms", []Type{TypeInt}, TypeInt)
+	defBuiltin("time_format_now", []Type{}, TypeString)
+
+	// 内存管理
+	defBuiltin("mem_alloc", []Type{TypeInt}, TypeInt)
+	defBuiltin("mem_free", []Type{TypeInt}, TypeInt)
+	defBuiltin("mem_write", []Type{TypeInt, TypeInt, TypeInt}, TypeVoid)
+	defBuiltin("mem_read", []Type{TypeInt, TypeInt}, TypeInt)
+	defBuiltin("mem_stats", []Type{}, TypeVoid)
+	defBuiltin("mem_check_leaks", []Type{}, TypeInt)
 
 	return &SemanticAnalyzer{
 		globalScope:  global,
@@ -416,6 +434,13 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 
 		sym, found := sa.currentScope.Resolve(funcIdent.Value)
 		if !found {
+			// 智能缩写与最短唯一前缀自动解析 (如 prin -> print, p -> println)
+			if canonical, ok := sa.ResolveFunctionAbbrev(funcIdent.Value); ok {
+				funcIdent.Value = canonical
+				sym, found = sa.currentScope.Resolve(canonical)
+			}
+		}
+		if !found {
 			sa.addError(funcIdent.Pos(), fmt.Sprintf("未定义的函数 %q", funcIdent.Value))
 			return TypeUnknown
 		}
@@ -424,6 +449,29 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 		if funcIdent.Value == "print" || funcIdent.Value == "println" {
 			for _, arg := range e.Arguments {
 				sa.inferExprType(arg)
+			}
+			return TypeVoid
+		}
+
+		// 内置断言与恐慌函数
+		if funcIdent.Value == "assert" {
+			if len(e.Arguments) < 1 {
+				sa.addError(e.Pos(), "assert 至少需要 1 个布尔参数")
+			} else {
+				t0 := sa.inferExprType(e.Arguments[0])
+				if t0 != nil && !t0.Equals(TypeBool) {
+					sa.addError(e.Arguments[0].Pos(), fmt.Sprintf("assert 第 1 个参数必须为 bool, 传入 %s", t0.Name()))
+				}
+				if len(e.Arguments) >= 2 {
+					_ = sa.inferExprType(e.Arguments[1])
+				}
+			}
+			return TypeVoid
+		}
+
+		if funcIdent.Value == "panic" {
+			for _, a := range e.Arguments {
+				_ = sa.inferExprType(a)
 			}
 			return TypeVoid
 		}
