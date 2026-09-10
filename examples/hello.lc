@@ -1,0 +1,34 @@
+// Lcode 自研编程语言示例
+// 展示 fn 函数定义、let 不可变绑定、mut 可变变量与控制流
+
+fn add(x: int, y: int) -> int {
+    return x + y;
+}
+
+fn calculateTax(income: float, rate: float) -> float {
+    return income * rate;
+}
+
+fn main() {
+    let title: string = "=== Lcode 语言编译器运行测试 ===";
+    println(title);
+
+    // 1. 常量与变量测试
+    let a: int = 15;
+    let b = 25;
+    let sum = add(a, b);
+    println("加法计算结果: ", sum);
+
+    // 2. 可变变量与循环求和
+    mut counter = 0;
+    mut total = 0;
+    while counter < 5 {
+        counter += 1;
+        total += counter;
+    }
+    println("1 到 5 累加和为: ", total);
+
+    // 3. 浮点运算
+    let tax = calculateTax(10000.0, 0.15);
+    println("税费计算 (10000.0 * 0.15): ", tax);
+}

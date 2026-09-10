@@ -1,0 +1,15 @@
+// 斐波那契递归计算示例
+
+fn fibonacci(n: int) -> int {
+    if n <= 1 {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+fn main() {
+    println("--- 斐波那契数列 (递归算法) ---");
+    let n = 10;
+    let res = fibonacci(n);
+    println("fibonacci(", n, ") 结果 =", res);
+}
