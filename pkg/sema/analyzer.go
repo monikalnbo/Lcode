@@ -420,6 +420,14 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 			return TypeUnknown
 		}
 
+		// 内置变长打印函数 print / println 支持任意类型与参数数量
+		if funcIdent.Value == "print" || funcIdent.Value == "println" {
+			for _, arg := range e.Arguments {
+				sa.inferExprType(arg)
+			}
+			return TypeVoid
+		}
+
 		fnType, ok := sym.Type.(*FuncType)
 		if !ok {
 			sa.addError(funcIdent.Pos(), fmt.Sprintf("%q 不是一个可调用的函数", funcIdent.Value))
