@@ -1,0 +1,6 @@
+fn main() -> void {
+    let a = alloc(16);
+    let b = a;
+    let v = read(a, 0);
+    p(v);
+}

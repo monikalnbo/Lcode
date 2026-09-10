@@ -238,16 +238,16 @@ func runCheck(filename string) {
 	if hasErrors {
 		fmt.Println()
 		for _, msg := range l.Errors {
-			fmt.Println(ui.RenderDiagnosticCard(ui.Diagnostic{Level: "error", Filename: filename, Line: 1, Column: 1, Message: msg}, content))
+			fmt.Println(ui.RenderDiagnosticCard(ui.ParseDiagnostic(msg, filename), content))
 		}
 		for _, msg := range p.Errors() {
-			fmt.Println(ui.RenderDiagnosticCard(ui.Diagnostic{Level: "error", Filename: filename, Line: 1, Column: 1, Message: msg}, content))
+			fmt.Println(ui.RenderDiagnosticCard(ui.ParseDiagnostic(msg, filename), content))
 		}
 		for _, msg := range modErrors {
-			fmt.Println(ui.RenderDiagnosticCard(ui.Diagnostic{Level: "error", Filename: filename, Line: 1, Column: 1, Message: msg}, content))
+			fmt.Println(ui.RenderDiagnosticCard(ui.ParseDiagnostic(msg, filename), content))
 		}
 		for _, msg := range analyzer.Errors {
-			fmt.Println(ui.RenderDiagnosticCard(ui.Diagnostic{Level: "error", Filename: filename, Line: 1, Column: 1, Message: msg}, content))
+			fmt.Println(ui.RenderDiagnosticCard(ui.ParseDiagnostic(msg, filename), content))
 		}
 		os.Exit(1)
 	}

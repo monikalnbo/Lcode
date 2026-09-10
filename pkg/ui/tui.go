@@ -161,37 +161,21 @@ func renderDiagnosticsBox(filename, sourceCode string, lexErrs, parseErrs, semaE
 	var sb strings.Builder
 
 	for _, msg := range lexErrs {
-		diag := Diagnostic{
-			Level:    "error",
-			Filename: filename,
-			Line:     1,
-			Column:   1,
-			Message:  msg,
-			Hint:     "请检查词法字符",
-		}
+		diag := ParseDiagnostic(msg, filename)
+		diag.Hint = "请检查词法字符"
 		sb.WriteString(RenderDiagnosticCard(diag, sourceCode) + "\n")
 	}
 
 	for _, msg := range parseErrs {
-		diag := Diagnostic{
-			Level:    "error",
-			Filename: filename,
-			Line:     1,
-			Column:   1,
-			Message:  msg,
-			Hint:     "语法不符合 Lcode 语法规范",
-		}
+		diag := ParseDiagnostic(msg, filename)
+		diag.Hint = "语法不符合 Lcode 语法规范"
 		sb.WriteString(RenderDiagnosticCard(diag, sourceCode) + "\n")
 	}
 
 	for _, msg := range semaErrs {
-		diag := Diagnostic{
-			Level:    "error",
-			Filename: filename,
-			Line:     1,
-			Column:   1,
-			Message:  msg,
-			Hint:     "语义或类型约束不满足",
+		diag := ParseDiagnostic(msg, filename)
+		if diag.Hint == "" {
+			diag.Hint = "语义或类型约束不满足"
 		}
 		sb.WriteString(RenderDiagnosticCard(diag, sourceCode) + "\n")
 	}
