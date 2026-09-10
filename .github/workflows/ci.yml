@@ -46,6 +46,17 @@ jobs:
         run: |
           ./bin/lcode run examples/cpp_demo.lc
 
+      - name: 运行 Rust 所有权与 RAII 内存管理演示 (rust_ownership_demo.lc)
+        run: |
+          ./bin/lcode run examples/rust_ownership_demo.lc
+
+      - name: 验证现代 C++17 转译与原生编译执行 (to-cpp & g++)
+        run: |
+          mkdir -p build
+          ./bin/lcode to-cpp examples/rust_ownership_demo.lc -o build/rust_demo.cpp
+          g++ -std=c++17 -Icpp/include build/rust_demo.cpp -o build/rust_demo
+          ./build/rust_demo
+
       - name: 上传编译产物 (Binaries)
         uses: actions/upload-artifact@v4
         with:
