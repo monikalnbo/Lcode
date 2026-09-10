@@ -1,0 +1,45 @@
+name: Lcode Compiler CI & Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    name: 编译测试与自动化构建
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 配置 Go 1.21 环境
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: 运行全部单元测试
+        run: |
+          go test ./... -v
+
+      - name: 编译构建 (Linux 与 Windows 双端)
+        run: |
+          mkdir -p bin
+          go build -v -o bin/lcode ./cmd/lcode
+          GOOS=windows GOARCH=amd64 go build -v -o bin/lcode.exe ./cmd/lcode
+
+      - name: 运行终端 Studio 可视化成果演示 (hello.lc)
+        run: |
+          ./bin/lcode studio examples/hello.lc
+
+      - name: 运行斐波那契递归程序 (fibonacci.lc)
+        run: |
+          ./bin/lcode run examples/fibonacci.lc
+
+      - name: 上传编译产物 (Binaries)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcode-executable-binaries
+          path: bin/
