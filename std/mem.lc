@@ -13,6 +13,11 @@ fn free(handle: int) -> int {
     return mem_free(handle);
 }
 
+// 显式销毁并释放资源所有权 (Rust 风格 drop)
+fn drop(handle: int) -> int {
+    return mem_free(handle);
+}
+
 // 向内存块指定偏移写入 64 位整数值 (具备越界与释放后使用检查)
 fn write(handle: int, offset: int, value: int) -> void {
     mem_write(handle, offset, value);

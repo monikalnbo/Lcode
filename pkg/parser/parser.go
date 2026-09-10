@@ -73,6 +73,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.BOOL, p.parseBooleanLiteral)
 	p.registerPrefix(token.NOT, p.parsePrefixExpr)
 	p.registerPrefix(token.SUB, p.parsePrefixExpr)
+	p.registerPrefix(token.AMP, p.parsePrefixExpr)
+	p.registerPrefix(token.MUL, p.parsePrefixExpr)
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpr)
 
 	// 注册中缀解析函数

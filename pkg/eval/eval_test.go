@@ -92,3 +92,42 @@ fn main() -> void {
 	}
 }
 
+func TestRAIIScopeDrop(t *testing.T) {
+	input := `
+fn main() -> void {
+    {
+        // 局部块内部申请堆内存
+        let temp = alloc(8);
+        write(temp, 0, 777);
+        let val = read(temp, 0);
+        p("val:", val);
+        // 不执行手动 free(temp)，依靠 Rust 风格的 RAII 作用域自动 Drop 释放！
+    }
+
+    // 离开块后，检查内存泄漏
+    let leaks = check_leaks();
+    p("leaks_after_scope:", leaks);
+}
+`
+	l := lexer.New("test_raii.lc", input)
+	p := parser.New(l)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	ev := New()
+	out, err := ev.RunProgram(prog)
+	if err != nil {
+		t.Fatalf("Eval error: %v", err)
+	}
+
+	if !strings.Contains(out, "val: 777") {
+		t.Errorf("Expected 'val: 777', got %s", out)
+	}
+	if !strings.Contains(out, "leaks_after_scope: 0") {
+		t.Errorf("Expected 'leaks_after_scope: 0' (automatic RAII drop), got %s", out)
+	}
+}
+
+

@@ -9,10 +9,11 @@ import (
 
 // SemanticAnalyzer 语义与类型分析器
 type SemanticAnalyzer struct {
-	globalScope  *Scope
-	currentScope *Scope
-	currentFunc  *ast.FuncDecl
-	Errors       []string
+	globalScope   *Scope
+	currentScope  *Scope
+	currentFunc   *ast.FuncDecl
+	BorrowChecker *BorrowChecker
+	Errors        []string
 }
 
 // NewAnalyzer 创建语义分析器并初始化内置符号
@@ -51,18 +52,26 @@ func NewAnalyzer() *SemanticAnalyzer {
 	defBuiltin("time_elapsed_ms", []Type{TypeInt}, TypeInt)
 	defBuiltin("time_format_now", []Type{}, TypeString)
 
-	// 内存管理
+	// 内存管理与 Rust 风格所有权/RAII
 	defBuiltin("mem_alloc", []Type{TypeInt}, TypeInt)
+	defBuiltin("alloc", []Type{TypeInt}, TypeInt)
 	defBuiltin("mem_free", []Type{TypeInt}, TypeInt)
+	defBuiltin("free", []Type{TypeInt}, TypeInt)
+	defBuiltin("drop", []Type{TypeInt}, TypeInt)
 	defBuiltin("mem_write", []Type{TypeInt, TypeInt, TypeInt}, TypeVoid)
+	defBuiltin("write", []Type{TypeInt, TypeInt, TypeInt}, TypeVoid)
 	defBuiltin("mem_read", []Type{TypeInt, TypeInt}, TypeInt)
+	defBuiltin("read", []Type{TypeInt, TypeInt}, TypeInt)
 	defBuiltin("mem_stats", []Type{}, TypeVoid)
+	defBuiltin("stats", []Type{}, TypeVoid)
 	defBuiltin("mem_check_leaks", []Type{}, TypeInt)
+	defBuiltin("check_leaks", []Type{}, TypeInt)
 
 	return &SemanticAnalyzer{
-		globalScope:  global,
-		currentScope: global,
-		Errors:       make([]string, 0),
+		globalScope:   global,
+		currentScope:  global,
+		BorrowChecker: NewBorrowChecker(),
+		Errors:        make([]string, 0),
 	}
 }
 
@@ -272,6 +281,18 @@ func (sa *SemanticAnalyzer) analyzeVarDecl(v *ast.VarDeclStmt) {
 	if err := sa.currentScope.Define(sym); err != nil {
 		sa.addError(v.Pos(), err.Error())
 	}
+
+	// 借用检查器：识别所有权托管资源与所有权移动 (Ownership & Move Tracking)
+	if call, ok := v.Value.(*ast.CallExpr); ok {
+		if fnIdent, ok := call.Function.(*ast.Identifier); ok {
+			if fnIdent.Value == "alloc" || fnIdent.Value == "mem_alloc" {
+				sa.BorrowChecker.RegisterResource(v.Name.Value, v.Pos())
+			}
+		}
+	} else if srcIdent, ok := v.Value.(*ast.Identifier); ok {
+		// 变量赋值转移: let b = a; 发生所有权转移 (Move)
+		_ = sa.BorrowChecker.Move(srcIdent.Value, v.Name.Value, v.Pos())
+	}
 }
 
 func (sa *SemanticAnalyzer) analyzeAssignStmt(as *ast.AssignStmt) {
@@ -296,6 +317,19 @@ func (sa *SemanticAnalyzer) analyzeAssignStmt(as *ast.AssignStmt) {
 	if rightType != nil && sym.Type != nil && !sym.Type.Equals(rightType) {
 		sa.addError(as.Right.Pos(), fmt.Sprintf("赋值类型不匹配: 变量 %q 类型为 %s, 赋值表达式类型为 %s",
 			ident.Value, sym.Type.Name(), rightType.Name()))
+	}
+
+	// 借用检查器：赋值转移所有权 (Move) 或接收堆分配
+	if srcIdent, ok := as.Right.(*ast.Identifier); ok {
+		if sa.BorrowChecker.IsResource(srcIdent.Value) {
+			_ = sa.BorrowChecker.Move(srcIdent.Value, ident.Value, as.Pos())
+		}
+	} else if call, ok := as.Right.(*ast.CallExpr); ok {
+		if fnIdent, ok := call.Function.(*ast.Identifier); ok {
+			if fnIdent.Value == "alloc" || fnIdent.Value == "mem_alloc" {
+				sa.BorrowChecker.RegisterResource(ident.Value, as.Pos())
+			}
+		}
 	}
 }
 
@@ -353,6 +387,10 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 			sa.addError(e.Pos(), fmt.Sprintf("未定义的标识符 %q", e.Value))
 			return TypeUnknown
 		}
+		// 借用检查器：审查变量是否可合法访问（未被移动）
+		if err := sa.BorrowChecker.AccessRead(e.Value, e.Pos()); err != nil {
+			sa.addError(e.Pos(), err.Error())
+		}
 		return sym.Type
 
 	case *ast.GroupedExpr:
@@ -370,6 +408,19 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 			if rightType != nil && !rightType.Equals(TypeInt) && !rightType.Equals(TypeFloat) {
 				sa.addError(e.Pos(), fmt.Sprintf("负号运算符 '-' 操作数必须为数值类型, 实际为 %s", rightType.Name()))
 			}
+			return rightType
+		}
+		if e.Operator == "&" {
+			// Rust 风格借用操作符 (&x)
+			if ident, ok := e.Right.(*ast.Identifier); ok {
+				if err := sa.BorrowChecker.Borrow(ident.Value, e.Pos()); err != nil {
+					sa.addError(e.Pos(), err.Error())
+				}
+			}
+			return rightType
+		}
+		if e.Operator == "*" {
+			// 解引用操作符 (*x)
 			return rightType
 		}
 		return TypeUnknown
@@ -476,6 +527,19 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 			return TypeVoid
 		}
 
+		// 内存释放与 Rust 显式 drop 消费所有权
+		if funcIdent.Value == "drop" || funcIdent.Value == "free" || funcIdent.Value == "mem_free" {
+			if len(e.Arguments) >= 1 {
+				_ = sa.inferExprType(e.Arguments[0])
+				if ident, ok := e.Arguments[0].(*ast.Identifier); ok {
+					if err := sa.BorrowChecker.Drop(ident.Value, ident.Pos()); err != nil {
+						sa.addError(ident.Pos(), err.Error())
+					}
+				}
+			}
+			return TypeInt
+		}
+
 		fnType, ok := sym.Type.(*FuncType)
 		if !ok {
 			sa.addError(funcIdent.Pos(), fmt.Sprintf("%q 不是一个可调用的函数", funcIdent.Value))
@@ -488,12 +552,23 @@ func (sa *SemanticAnalyzer) inferExprType(expr ast.Expr) Type {
 			return fnType.ReturnType
 		}
 
+		isReadOrWrite := funcIdent.Value == "read" || funcIdent.Value == "mem_read" || funcIdent.Value == "write" || funcIdent.Value == "mem_write"
 		for i, arg := range e.Arguments {
 			argType := sa.inferExprType(arg)
 			expectedType := fnType.ParamTypes[i]
 			if argType != nil && expectedType != nil && !argType.Equals(expectedType) {
 				sa.addError(arg.Pos(), fmt.Sprintf("函数 %q 第 %d 个实参类型不匹配: 期望 %s, 传入 %s",
 					funcIdent.Value, i+1, expectedType.Name(), argType.Name()))
+			}
+
+			// Rust 风格按值传递移动所有权 (Move on by-value argument pass)
+			if !isReadOrWrite {
+				if ident, ok := arg.(*ast.Identifier); ok {
+					if sa.BorrowChecker.IsResource(ident.Value) {
+						targetParam := fmt.Sprintf("%s(形参_%d)", funcIdent.Value, i+1)
+						_ = sa.BorrowChecker.Move(ident.Value, targetParam, arg.Pos())
+					}
+				}
 			}
 		}
 

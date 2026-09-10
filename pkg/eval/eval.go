@@ -51,9 +51,10 @@ func (v FunctionValue) Type() string   { return "function" }
 
 // Environment 运行时环境
 type Environment struct {
-	parent *Environment
-	store  map[string]Value
-	stdout io.Writer
+	parent       *Environment
+	store        map[string]Value
+	stdout       io.Writer
+	ownedHandles []int64 // Rust-style RAII: 当前作用域持有的资源句柄
 }
 
 func NewEnvironment(parent *Environment, stdout io.Writer) *Environment {
@@ -61,9 +62,10 @@ func NewEnvironment(parent *Environment, stdout io.Writer) *Environment {
 		stdout = parent.stdout
 	}
 	return &Environment{
-		parent: parent,
-		store:  make(map[string]Value),
-		stdout: stdout,
+		parent:       parent,
+		store:        make(map[string]Value),
+		stdout:       stdout,
+		ownedHandles: make([]int64, 0),
 	}
 }
 
@@ -308,12 +310,33 @@ func (ev *Evaluator) Eval(node ast.Node, env *Environment) (Value, error) {
 
 func (ev *Evaluator) evalBlockStmt(block *ast.BlockStmt, env *Environment) (Value, error) {
 	subEnv := NewEnvironment(env, env.stdout)
+	defer func() {
+		// Rust 风格 RAII: 当前代码块作用域退出，自动 Drop 析构本块内持有的未释放堆资源
+		for _, handle := range subEnv.ownedHandles {
+			if b, ok := ev.MemManager.blocks[handle]; ok && !b.Freed {
+				_ = ev.MemManager.Free(handle)
+			}
+		}
+	}()
+
 	for _, stmt := range block.Statements {
 		res, err := ev.Eval(stmt, subEnv)
 		if err != nil {
 			return nil, err
 		}
 		if ret, ok := res.(ReturnValue); ok {
+			// 如果返回的是句柄值，发生所有权逃逸转移给父级环境，当前作用域不提前 drop！
+			if iv, ok := ret.Value.(IntValue); ok {
+				for i, h := range subEnv.ownedHandles {
+					if h == iv.Value {
+						if env != nil {
+							env.ownedHandles = append(env.ownedHandles, h)
+						}
+						subEnv.ownedHandles = append(subEnv.ownedHandles[:i], subEnv.ownedHandles[i+1:]...)
+						break
+					}
+				}
+			}
 			return ret, nil
 		}
 	}
@@ -385,6 +408,9 @@ func (ev *Evaluator) evalCall(call *ast.CallExpr, env *Environment) (Value, erro
 
 func (ev *Evaluator) evalUnary(op string, right Value) (Value, error) {
 	switch op {
+	case "&", "*":
+		// Rust 风格借用/解引用运算符
+		return right, nil
 	case "!":
 		if b, ok := right.(BoolValue); ok {
 			return BoolValue{Value: !b.Value}, nil
@@ -571,7 +597,7 @@ func (ev *Evaluator) evalBuiltinCall(name string, call *ast.CallExpr, env *Envir
 	case "time_format_now":
 		return StringValue{Value: TimeFormatNow()}, true, nil
 
-	case "mem_alloc":
+	case "mem_alloc", "alloc":
 		if len(call.Arguments) < 1 {
 			return nil, true, fmt.Errorf("mem_alloc 需要指定分配大小")
 		}
@@ -591,11 +617,15 @@ func (ev *Evaluator) evalBuiltinCall(name string, call *ast.CallExpr, env *Envir
 		if err != nil {
 			return nil, true, err
 		}
+		// 记录当前作用域持有该句柄，作用域结束时若未转移将自动 RAII Drop
+		if env != nil {
+			env.ownedHandles = append(env.ownedHandles, h)
+		}
 		return IntValue{Value: h}, true, nil
 
-	case "mem_free":
+	case "mem_free", "free", "drop":
 		if len(call.Arguments) < 1 {
-			return nil, true, fmt.Errorf("mem_free 需要指定内存句柄")
+			return nil, true, fmt.Errorf("mem_free/drop 需要指定内存句柄")
 		}
 		hVal, err := ev.Eval(call.Arguments[0], env)
 		if err != nil {
@@ -603,15 +633,24 @@ func (ev *Evaluator) evalBuiltinCall(name string, call *ast.CallExpr, env *Envir
 		}
 		iVal, ok := hVal.(IntValue)
 		if !ok {
-			return nil, true, fmt.Errorf("mem_free 句柄必须为整型")
+			return nil, true, fmt.Errorf("mem_free/drop 句柄必须为整型")
 		}
 		err = ev.MemManager.Free(iVal.Value)
 		if err != nil {
 			return nil, true, err
 		}
+		// 显式释放后从当前作用域拥有列表中移除，避免作用域退出时重复 drop
+		if env != nil {
+			for i, h := range env.ownedHandles {
+				if h == iVal.Value {
+					env.ownedHandles = append(env.ownedHandles[:i], env.ownedHandles[i+1:]...)
+					break
+				}
+			}
+		}
 		return IntValue{Value: 0}, true, nil
 
-	case "mem_write":
+	case "mem_write", "write":
 		if len(call.Arguments) < 3 {
 			return nil, true, fmt.Errorf("mem_write 需要 (handle, offset, value)")
 		}
@@ -639,7 +678,7 @@ func (ev *Evaluator) evalBuiltinCall(name string, call *ast.CallExpr, env *Envir
 		}
 		return VoidValue{}, true, nil
 
-	case "mem_read":
+	case "mem_read", "read":
 		if len(call.Arguments) < 2 {
 			return nil, true, fmt.Errorf("mem_read 需要 (handle, offset)")
 		}
@@ -662,14 +701,14 @@ func (ev *Evaluator) evalBuiltinCall(name string, call *ast.CallExpr, env *Envir
 		}
 		return IntValue{Value: v}, true, nil
 
-	case "mem_stats":
+	case "mem_stats", "stats":
 		st := ev.MemManager.Stats()
 		out := fmt.Sprintf("【内存统计】: 累计分配 %d 字节, 当前活跃 %d 字节, 峰值 %d 字节, 分配 %d 次, 释放 %d 次\n",
 			st.TotalAllocatedBytes, st.ActiveBytes, st.PeakBytes, st.AllocCount, st.FreeCount)
 		_, _ = env.stdout.Write([]byte(out))
 		return VoidValue{}, true, nil
 
-	case "mem_check_leaks":
+	case "mem_check_leaks", "check_leaks":
 		leaks := ev.MemManager.CheckLeaks()
 		if len(leaks) > 0 {
 			var sb strings.Builder

@@ -73,11 +73,13 @@ fun main() -> void {
 - 线程休眠控制 `time_sleep_ms(ms)` 与耗时基准统计 `time_elapsed_ms(start)`。
 - 标准库 `std/time.lc` 提供开箱即用的高阶时间与格式化接口。
 
-### 3.3 虚拟堆内存管理与泄漏检测 (Memory Management)
-- 虚拟堆内存管理器：`mem_alloc(size)` 分配连续字长内存块，返回唯一安全句柄。
-- 安全读写：`mem_write(h, off, val)` 与 `mem_read(h, off)` 自带越界拦截与释放后使用 (UAF) 检查。
-- 生命周期控制：`mem_free(h)` 自带双重释放 (Double Free) 检测。
-- 零开销泄漏诊断：`mem_stats()` 打印堆指标，`mem_check_leaks()` 自动探查未释放块并告警。
+### 3.3 深度对齐 Rust 的内存管理与所有权模型 (Rust-style Ownership & RAII)
+- **单所有权与移动语义 (Move)**：堆资源在赋值 `let b = a` 或传参时自动转移所有权；二次使用被移走的原变量将在编译期被借用检查器精准拦截，抛出 Rust 标准错误码 `[E0382]`。
+- **引用借用操作符 (`&`)**：使用 `&x` 实现零成本不可变借用，避免剥夺原始所有权。
+- **RAII 作用域自动析构 (Deterministic Scope Drop)**：花括号代码块 `{ ... }` 或函数退出时，未移走的局部资源由系统自动析构释放，天然杜绝内存泄漏，无需依赖 GC 垃圾回收器。
+- **返回值所有权逃逸 (Ownership Escape)**：函数返回堆资源句柄时自动逃逸至父作用域，保障返回值生命周期延续。
+- **显式销毁 (`drop(x)`)**：支持 Rust 风格的 `drop()` 显式回收。
+- **底层安全保障**：越界拦截、双重释放 (Double Free) 预防、释放后使用 (UAF) 拦截与 `check_leaks()` 零泄漏验证。
 
 ### 3.4 运行时调用栈与栈帧追踪技术 (Call Stack Technology)
 - 结构化 `CallStack` 与 `CallFrame` 深度管理。

@@ -162,11 +162,46 @@ private:
     int64_t peak_bytes = 0;
     int64_t alloc_count = 0;
     int64_t free_count = 0;
+    std::vector<std::vector<int64_t>> scope_stack;
 
 public:
     static MemoryManager& instance() {
         static MemoryManager inst;
         return inst;
+    }
+
+    void enter_scope() {
+        scope_stack.emplace_back();
+    }
+
+    void exit_scope() {
+        if (scope_stack.empty()) return;
+        auto handles = scope_stack.back();
+        scope_stack.pop_back();
+        for (int64_t h : handles) {
+            auto it = blocks.find(h);
+            if (it != blocks.end() && !it->second.freed) {
+                it->second.freed = true;
+                free_count++;
+                active_bytes -= it->second.size * 8;
+            }
+        }
+    }
+
+    int64_t escape_return(int64_t h) {
+        if (!scope_stack.empty()) {
+            auto& curr = scope_stack.back();
+            for (auto it = curr.begin(); it != curr.end(); ++it) {
+                if (*it == h) {
+                    curr.erase(it);
+                    if (scope_stack.size() >= 2) {
+                        scope_stack[scope_stack.size() - 2].push_back(h);
+                    }
+                    break;
+                }
+            }
+        }
+        return h;
     }
 
     int64_t alloc(int64_t size) {
@@ -178,6 +213,10 @@ public:
         b.data.resize(size, 0);
         b.freed = false;
         blocks[h] = b;
+
+        if (!scope_stack.empty()) {
+            scope_stack.back().push_back(h);
+        }
 
         int64_t b_size = size * 8;
         alloc_count++;
@@ -196,8 +235,7 @@ public:
             return -1;
         }
         if (it->second.freed) {
-            std::cerr << "[C++ 运行时错误] 重复释放内存 0x" << std::hex << handle << std::dec << std::endl;
-            return -1;
+            return 0; // 已经释放，安全忽略
         }
         it->second.freed = true;
         free_count++;
@@ -244,6 +282,25 @@ public:
         return leaks;
     }
 };
+
+class ScopeGuard {
+public:
+    ScopeGuard() {
+        MemoryManager::instance().enter_scope();
+    }
+    ~ScopeGuard() {
+        MemoryManager::instance().exit_scope();
+    }
+};
+
+template <typename T>
+inline T escape_return(T val) {
+    return val;
+}
+
+inline int64_t escape_return(int64_t h) {
+    return MemoryManager::instance().escape_return(h);
+}
 
 } // namespace mem
 
@@ -304,6 +361,27 @@ inline void mem_write(int64_t h, int64_t off, int64_t v) { lcode::mem::MemoryMan
 inline int64_t mem_read(int64_t h, int64_t off) { return lcode::mem::MemoryManager::instance().read(h, off); }
 inline void mem_stats() { lcode::mem::MemoryManager::instance().stats(); }
 inline int64_t mem_check_leaks() { return lcode::mem::MemoryManager::instance().check_leaks(); }
+
+// Rust 风格别名与显式 drop
+inline int64_t alloc(int64_t sz) { return mem_alloc(sz); }
+inline int64_t free(int64_t h) { return mem_free(h); }
+inline int64_t drop(int64_t h) { return mem_free(h); }
+inline void write(int64_t h, int64_t off, int64_t v) { mem_write(h, off, v); }
+inline int64_t read(int64_t h, int64_t off) { return mem_read(h, off); }
+inline void stats() { mem_stats(); }
+inline int64_t check_leaks() { return mem_check_leaks(); }
+
+// Rust RAII 作用域自动析构守护与返回值所有权逃逸
+using ScopeGuard = lcode::mem::ScopeGuard;
+
+template <typename T>
+inline T escape_return(T val) {
+    return lcode::mem::escape_return(val);
+}
+
+inline int64_t escape_return(int64_t h) {
+    return lcode::mem::escape_return(h);
+}
 
 // 异常与调用栈桥接
 inline void panic(const std::string& msg) {

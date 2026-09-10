@@ -113,28 +113,60 @@ p("当前格式化时间:", format_now());
 
 ---
 
-## 7. 虚拟堆内存管理与泄漏追踪 (Memory Management)
+## 7. Rust 风格内存管理与所有权模型 (Rust-style Ownership & Memory Management)
 
-通过安全句柄管理虚拟堆内存分配、读写与双重释放检测，并具备零开销内存泄漏探针：
+Lcode 深度对齐了 Rust 的核心内存安全与所有权模型，杜绝垃圾回收器 (GC) 的停顿抖动，同时实现绝对的内存安全与零泄漏保证：
+
+### 1. 单一所有权与移动语义 (Single Ownership & Move Semantics)
+每个堆分配资源有且仅有一个所有者。当资源被赋值给新变量或通过实参按值传入函数时，发生所有权转移 (Move)。原变量立即失效，若尝试二次访问，将在语义编译期被直接拦截并抛出标准 Rust 错误码 `[E0382]`：
 
 ```lcode
-import "std/mem";
+let a = alloc(16);
+let b = a;          // 所有权转移: a -> b
+let val = read(a, 0); // ❌ 编译期拦截: [E0382] 使用已移动的所有权变量 (borrow of moved value)
+```
 
-// 申请 4 个 64 位整数的连续内存块
-let ptr = alloc(4);
+### 2. 借用与引用运算符 (`&`) (Borrowing)
+若需读取或借用变量内容而不剥夺所有权，可使用 `&` 借用运算符：
 
-// 带有边界越界检查与释放后使用检查的读写
-write(ptr, 0, 1024);
-let v = read(ptr, 0);
+```lcode
+fn inspect(buf: int) -> void {
+    p("Buffer value at 0:", read(buf, 0));
+}
 
-// 查看堆分配指标
-stats();
+let a = alloc(16);
+inspect(&a);        // 借用传参：不转移所有权
+let val = read(a, 0); // ✓ 正常访问：a 依然保持完整所有权
+```
 
-// 安全回收释放
-free(ptr);
+### 3. 显式销毁 (`drop(x)`)
+支持 Rust 风格的 `drop(x)` 显式消耗并释放资源所有权。被 `drop` 的变量后续禁止再次使用：
 
-// 零泄漏检查
-let leakCount = check_leaks();
+```lcode
+let res = alloc(32);
+drop(res);          // 立即销毁并回收底层内存
+```
+
+### 4. RAII 作用域自动析构 (Zero-leak RAII Scope Drop)
+当代码块 `{ ... }` 或函数退出时，当前作用域内所有未被移走的资源句柄将被系统**自动析构释放 (RAII Drop)**，无需手动编写 `free()`，保障天然的零内存泄漏：
+
+```lcode
+{
+    let temp = alloc(64);
+    write(temp, 0, 999);
+    // temp 离开花括号代码块，自动触发析构 Drop，无任何泄漏！
+}
+assert(check_leaks() == 0, "离开作用域后堆内存自动回收清零");
+```
+
+### 5. 返回值所有权逃逸 (Ownership Escape)
+若函数在作用域结束时将资源通过 `ret` 返回，该资源的所有权将安全逃逸至调用方父级作用域，不会被提早释放：
+
+```lcode
+fn make_buffer() -> int {
+    let buf = alloc(128);
+    ret buf; // 所有权安全逃逸至上层
+}
 ```
 
 ---

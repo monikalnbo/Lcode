@@ -224,7 +224,7 @@ func (g *Generator) generateStmt(stmt ast.Stmt) error {
 			if err != nil {
 				return err
 			}
-			g.buf.WriteString(fmt.Sprintf("return %s;\n", valStr))
+			g.buf.WriteString(fmt.Sprintf("return escape_return(%s);\n", valStr))
 		} else {
 			g.buf.WriteString("return;\n")
 		}
@@ -241,6 +241,8 @@ func (g *Generator) generateStmt(stmt ast.Stmt) error {
 		g.writeIndent()
 		g.buf.WriteString("{\n")
 		g.indent++
+		g.writeIndent()
+		g.buf.WriteString("ScopeGuard _scope_raii;\n")
 		for _, subStmt := range s.Statements {
 			if err := g.generateStmt(subStmt); err != nil {
 				return err
@@ -288,6 +290,13 @@ func (g *Generator) generateExpr(expr ast.Expr) (string, error) {
 		right, err := g.generateExpr(e.Right)
 		if err != nil {
 			return "", err
+		}
+		if e.Operator == "&" {
+			// Rust 风格借用标记 (&x)：向 C++ 传递被借用的底层对象句柄
+			return right, nil
+		}
+		if e.Operator == "*" {
+			return fmt.Sprintf("(*%s)", right), nil
 		}
 		return fmt.Sprintf("(%s%s)", e.Operator, right), nil
 

@@ -48,10 +48,11 @@ const (
 	GTR TokenType = ">"
 	GEQ TokenType = ">="
 
-	// 逻辑运算符
+	// 逻辑与借用运算符
 	LAND TokenType = "&&"
 	LOR  TokenType = "||"
 	NOT  TokenType = "!"
+	AMP  TokenType = "&" // Rust-style 借用/引用 (&x)
 
 	// 赋值与声明
 	ASSIGN     TokenType = "="
@@ -93,6 +94,9 @@ const (
 	NIL      TokenType = "nil"
 	IMPORT   TokenType = "import"
 	AS       TokenType = "as"
+	IN       TokenType = "in"
+	TRY      TokenType = "try"
+	CATCH    TokenType = "catch"
 )
 
 // Token 结构体表示一个具体的词法单元
@@ -129,6 +133,9 @@ var keywords = map[string]TokenType{
 	"import":   IMPORT,
 	"imp":      IMPORT,
 	"as":       AS,
+	"in":       IN,
+	"try":      TRY,
+	"catch":    CATCH,
 }
 
 // LookupIdent 检查标识符是否为关键字

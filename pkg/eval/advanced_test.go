@@ -153,3 +153,50 @@ fn main() -> void {
 		t.Errorf("Expected Stack Overflow error, got %v", err)
 	}
 }
+
+func TestRustMemoryManagementAndRAII(t *testing.T) {
+	input := `
+fn create_and_escape() -> int {
+    let buf = alloc(10);
+    write(buf, 0, 777);
+    ret buf; // 所有权逃逸至调用者，不在本作用域释放
+}
+
+fn main() -> void {
+    // 1. 测试代码块作用域自动 Drop
+    {
+        let temp = alloc(20);
+        write(temp, 0, 123);
+        // temp 离开块作用域，自动由 RAII Drop 释放
+    }
+    let leaks1 = check_leaks();
+    assert(leaks1 == 0, "RAII 作用域自动 Drop 应当确保零内存泄漏");
+
+    // 2. 测试返回值所有权逃逸与显式 drop
+    let my_buf = create_and_escape();
+    let val = read(my_buf, 0);
+    assert(val == 777, "逃逸句柄数据应当保持完整");
+    drop(my_buf); // 显式释放
+
+    let leaks2 = check_leaks();
+    assert(leaks2 == 0, "显式 drop 后应当零内存泄漏");
+    p("Rust 内存管理全部验证通过");
+}
+`
+	l := lexer.New("test_rust_mem.lc", input)
+	p := parser.New(l)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser error: %v", p.Errors())
+	}
+
+	ev := New()
+	out, err := ev.RunProgram(prog)
+	if err != nil {
+		t.Fatalf("RunProgram error: %v", err)
+	}
+	if !strings.Contains(out, "Rust 内存管理全部验证通过") {
+		t.Errorf("Expected output not found, got: %s", out)
+	}
+}
+

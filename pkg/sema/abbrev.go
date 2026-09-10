@@ -6,17 +6,23 @@ import (
 
 // StandardAliases 常用内建函数缩写映射
 var StandardAliases = map[string]string{
-	"p":        "println",
-	"pr":       "print",
-	"prin":     "print",
-	"pri":      "print",
-	"pln":      "println",
-	"prn":      "println",
-	"mem_chk":  "mem_check_leaks",
-	"stk_dump": "stack_dump",
-	"stk":      "stack_dump",
-	"now":      "time_now_ms",
-	"sleep":    "time_sleep_ms",
+	"p":           "println",
+	"pr":          "print",
+	"prin":        "print",
+	"pri":         "print",
+	"pln":         "println",
+	"prn":         "println",
+	"alloc":       "mem_alloc",
+	"free":        "mem_free",
+	"read":        "mem_read",
+	"write":       "mem_write",
+	"stats":       "mem_stats",
+	"check_leaks": "mem_check_leaks",
+	"mem_chk":     "mem_check_leaks",
+	"stk_dump":    "stack_dump",
+	"stk":         "stack_dump",
+	"now":         "time_now_ms",
+	"sleep":       "time_sleep_ms",
 }
 
 // ResolveFunctionAbbrev 根据缩写或最短唯一前缀，推导并返回规范的函数名称
