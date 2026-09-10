@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"lcode/pkg/ast"
 	"lcode/pkg/eval"
 	"lcode/pkg/lexer"
 	"lcode/pkg/parser"

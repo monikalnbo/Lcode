@@ -13,10 +13,10 @@ import (
 const (
 	_ int = iota
 	LOWEST
-	EQUALS      // == !=
-	LESSGREATER // > < >= <=
 	LOGICAL_OR  // ||
 	LOGICAL_AND // &&
+	EQUALS      // == !=
+	LESSGREATER // > < >= <=
 	SUM         // + -
 	PRODUCT     // * / %
 	PREFIX      // -x !x

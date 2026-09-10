@@ -59,7 +59,7 @@ func renderNode(node ast.Node, prefix string, isLast bool, sb *strings.Builder) 
 			ColorMuted, n.Pos(), Reset))
 
 		paramsAndBody := len(n.Params) + 1
-		for i, p := range n.Params {
+		for _, p := range n.Params {
 			pType := "any"
 			if p.Type != nil {
 				pType = p.Type.Name
